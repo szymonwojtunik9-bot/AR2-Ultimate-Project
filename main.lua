@@ -4,7 +4,14 @@
 -- ==============================================================================
 
 if getgenv().UnloadSolar then getgenv().UnloadSolar() end
-task.wait(0.1)
+task.wait(0.2)
+
+-- Usuwanie starych GUI (force)
+for _, v in pairs(game:GetService("CoreGui"):GetChildren()) do
+    if v:IsA("ScreenGui") and (v.Name:find("Solar") or v.Name:find("Menu")) then
+        v:Destroy()
+    end
+end
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -18,7 +25,7 @@ local Camera = Workspace.CurrentCamera
 
 -- Odświeżanie kamery po respawnie (krytyczny fix)
 LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
+    task.wait(1)
     Camera = Workspace.CurrentCamera
 end)
 
@@ -39,12 +46,12 @@ getgenv().SolarConfig = {
         HealthBar = true,
         Skeleton = true,
         WeaponESP = true,
-        Tracers = false, -- Nowa funkcja
+        Tracers = false,
         OffScreenArrows = true,
         Chams = true,
         MaxDistance = 5000,
         MinDistance = 0,
-        Crosshair = true -- Nowa funkcja
+        Crosshair = true
     },
     Combat = {
         AimAssist = true,
@@ -80,7 +87,7 @@ local function Round(obj, radius) local c = Instance.new("UICorner", obj); c.Cor
 -- ==============================================================================
 --[ PREMIUM UI ]
 -- ==============================================================================
-local ScreenGui = Instance.new("ScreenGui"); ScreenGui.Name = "SolarMenu_Pro"; ScreenGui.ResetOnSpawn = false; ScreenGui.Parent = SafeGui
+local ScreenGui = Instance.new("ScreenGui"); ScreenGui.Name = "SolarMenu_v4"; ScreenGui.ResetOnSpawn = false; ScreenGui.Parent = SafeGui
 local MainFrame = Instance.new("Frame", ScreenGui); MainFrame.Size = UDim2.new(0, 520, 0, 400); MainFrame.Position = UDim2.new(0.5, -260, 0.5, -200)
 MainFrame.BackgroundColor3 = Config.Colors.Background; MainFrame.BorderSizePixel = 0; MainFrame.Active = true; Round(MainFrame, 10)
 Instance.new("UIStroke", MainFrame).Color = Config.Colors.Main
@@ -92,7 +99,7 @@ UserInputService.InputEnded:Connect(function(input) if input.UserInputType == En
 
 local Sidebar = Instance.new("Frame", MainFrame); Sidebar.Size = UDim2.new(0, 140, 1, 0); Sidebar.BackgroundColor3 = Config.Colors.Section; Sidebar.BorderSizePixel = 0; Round(Sidebar, 10)
 local SideFix = Instance.new("Frame", Sidebar); SideFix.Size = UDim2.new(0, 10, 1, 0); SideFix.Position = UDim2.new(1, -10, 0, 0); SideFix.BackgroundColor3 = Config.Colors.Section; SideFix.BorderSizePixel = 0
-local Title = Instance.new("TextLabel", Sidebar); Title.Size = UDim2.new(1, 0, 0, 50); Title.Text = "AR2 PRO"; Title.Font = Enum.Font.GothamBlack; Title.TextColor3 = Config.Colors.Main; Title.TextSize = 20; Title.BackgroundTransparency = 1
+local Title = Instance.new("TextLabel", Sidebar); Title.Size = UDim2.new(1, 0, 0, 50); Title.Text = "AR2 PRO v4"; Title.Font = Enum.Font.GothamBlack; Title.TextColor3 = Config.Colors.Main; Title.TextSize = 20; Title.BackgroundTransparency = 1
 
 local ContentContainer = Instance.new("Frame", MainFrame); ContentContainer.Size = UDim2.new(1, -150, 1, -20); ContentContainer.Position = UDim2.new(0, 150, 0, 10); ContentContainer.BackgroundTransparency = 1
 local Tabs = {}; local TabFrames = {}
@@ -458,4 +465,8 @@ local AimRenderConn = RunService.RenderStepped:Connect(function()
 end)
 table.insert(getgenv().SolarConnections, AimRenderConn)
 
-print("[SOLARA] ZAAWANSOWANY SKRYPT ALL-IN-ONE ZAŁADOWANY.")
+print("========================================")
+print("   SOLARA AR2 ELITE v4 ZAŁADOWANA!   ")
+print("   Klawisz: INSERT do menu           ")
+print("========================================")
+warn("[SOLARA] Jeśli nie widzisz ESP, sprawdź czy masz włączone opcje w menu!")
