@@ -16,6 +16,12 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+-- Odświeżanie kamery po respawnie (krytyczny fix)
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    Camera = Workspace.CurrentCamera
+end)
+
 local SafeGui
 local success = pcall(function() SafeGui = (gethui and gethui()) or CoreGui end)
 if not success or not SafeGui then SafeGui = LocalPlayer:WaitForChild("PlayerGui") end
@@ -45,7 +51,7 @@ getgenv().SolarConfig = {
         ShowFOV = true,
         FOV = 150,
         MaxDistance = 5000,
-        Smoothness = 2, -- Zmieniono na 2 na prośbę
+        Smoothness = 0.5, -- 0.01 = wolno, 1.0 = natychmiast
         AimPart = "Head",
         WallCheck = true,
         TeamCheck = false,
@@ -155,7 +161,7 @@ CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Team Check", "TeamCheck", "Combat")
 CreateToggle(TabCbt, "Advance Physics", "AdvancedPrediction", "Combat")
 CreateToggle(TabCbt, "Auto Calibration", "AutoCalibration", "Combat")
-CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 10, true) -- Zwiększono zakres do 10
+CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 1, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 800, false)
 
 local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50); UnloadBtn.Text = "WYŁĄCZ CAŁY SKRYPT I GUI"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
@@ -163,6 +169,13 @@ getgenv().UnloadSolar = function()
     Config.State.Unloaded = true
     for _, conn in pairs(getgenv().SolarConnections) do pcall(function() conn:Disconnect() end) end
     table.clear(getgenv().SolarConnections)
+    -- Czyszczenie WSZYSTKICH rysunków
+    pcall(function() FOVRing:Remove() end)
+    pcall(function() CrosshairX:Remove() end)
+    pcall(function() CrosshairY:Remove() end)
+    for p, _ in pairs(Cache.Draw) do pcall(function() RemoveDrawings(p) end) end
+    for p, c in pairs(Cache.Chams) do pcall(function() c:Destroy() end) end
+    table.clear(Cache.Draw); table.clear(Cache.Chams)
     if ScreenGui then ScreenGui:Destroy() end
     getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil
 end
@@ -242,45 +255,54 @@ local ESP_Connection = RunService.RenderStepped:Connect(function()
 
         local success, err = pcall(function()
             local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and (not Config.Combat.TeamCheck or player.Team ~= LocalPlayer.Team) then
-                local root = char.HumanoidRootPart; local head = char:FindFirstChild("Head")
-                if not head then HideDrawings(player) return end
+            if not char then HideDrawings(player) return end
+            
+            local root = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChild("Humanoid")
+            if not root or not hum or hum.Health <= 0 then HideDrawings(player) return end
+            if Config.Combat.TeamCheck and player.Team ~= nil and player.Team == LocalPlayer.Team then HideDrawings(player) return end
+            
+            -- Head jest opcjonalny - fallback do root+offset jeśli go brak
+            local head = char:FindFirstChild("Head")
+            local headPos = head and head.Position or (root.Position + Vector3.new(0, 1.5, 0))
+            
+            local dist = (Camera.CFrame.Position - root.Position).Magnitude
+            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            
+            if dist >= Config.Visuals.MinDistance and dist <= Config.Visuals.MaxDistance then
+                local color = Config.Colors.Enemy
                 
-                local dist = (Camera.CFrame.Position - root.Position).Magnitude
-                local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                
-                if dist >= Config.Visuals.MinDistance and dist <= Config.Visuals.MaxDistance then
-                    local color = Config.Colors.Enemy
-                    
-                    if onScreen then
-                        d.OOF_Arrow.Visible = false; d.OOF_ArrowOutline.Visible = false
-                        local hPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.8, 0))
-                        local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                        local height = math.abs(hPos.Y - lPos.Y); local width = height * 0.6
-                        local boxPos = Vector2.new(pos.X - width/2, hPos.Y); local boxSize = Vector2.new(width, height)
+                if onScreen then
+                    d.OOF_Arrow.Visible = false; d.OOF_ArrowOutline.Visible = false
+                    local hPos = Camera:WorldToViewportPoint(headPos + Vector3.new(0, 0.8, 0))
+                    local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                    local height = math.abs(hPos.Y - lPos.Y)
+                    if height < 5 then HideDrawings(player) return end -- Za mały do rysowania
+                    local width = height * 0.6
+                    local boxPos = Vector2.new(pos.X - width/2, hPos.Y); local boxSize = Vector2.new(width, height)
 
-                        local showBox = Config.Visuals.BoxESP and not Config.Visuals.CornerBox
-                        d.Box.Visible = showBox; d.BoxOutline.Visible = showBox
-                        if showBox then d.Box.Position = boxPos; d.Box.Size = boxSize; d.Box.Color = color; d.BoxOutline.Position = boxPos; d.BoxOutline.Size = boxSize end
+                    local showBox = Config.Visuals.BoxESP and not Config.Visuals.CornerBox
+                    d.Box.Visible = showBox; d.BoxOutline.Visible = showBox
+                    if showBox then d.Box.Position = boxPos; d.Box.Size = boxSize; d.Box.Color = color; d.BoxOutline.Position = boxPos; d.BoxOutline.Size = boxSize end
 
-                        for i, l in pairs(d.Corners) do l.Visible = Config.Visuals.CornerBox; l.Color = color end
-                        if Config.Visuals.CornerBox then
-                            local cL = width / 4
-                            d.Corners[1].From = boxPos; d.Corners[1].To = boxPos + Vector2.new(cL, 0); d.Corners[2].From = boxPos; d.Corners[2].To = boxPos + Vector2.new(0, cL)
-                            d.Corners[3].From = boxPos + Vector2.new(width, 0); d.Corners[3].To = boxPos + Vector2.new(width - cL, 0); d.Corners[4].From = boxPos + Vector2.new(width, 0); d.Corners[4].To = boxPos + Vector2.new(width, cL)
-                            d.Corners[5].From = boxPos + Vector2.new(0, height); d.Corners[5].To = boxPos + Vector2.new(cL, height); d.Corners[6].From = boxPos + Vector2.new(0, height); d.Corners[6].To = boxPos + Vector2.new(0, height - cL)
-                            d.Corners[7].From = boxPos + Vector2.new(width, height); d.Corners[7].To = boxPos + Vector2.new(width - cL, height); d.Corners[8].From = boxPos + Vector2.new(width, height); d.Corners[8].To = boxPos + Vector2.new(width, height - cL)
-                        end
+                    for i, l in pairs(d.Corners) do l.Visible = Config.Visuals.CornerBox; l.Color = color end
+                    if Config.Visuals.CornerBox then
+                        local cL = width / 4
+                        d.Corners[1].From = boxPos; d.Corners[1].To = boxPos + Vector2.new(cL, 0); d.Corners[2].From = boxPos; d.Corners[2].To = boxPos + Vector2.new(0, cL)
+                        d.Corners[3].From = boxPos + Vector2.new(width, 0); d.Corners[3].To = boxPos + Vector2.new(width - cL, 0); d.Corners[4].From = boxPos + Vector2.new(width, 0); d.Corners[4].To = boxPos + Vector2.new(width, cL)
+                        d.Corners[5].From = boxPos + Vector2.new(0, height); d.Corners[5].To = boxPos + Vector2.new(cL, height); d.Corners[6].From = boxPos + Vector2.new(0, height); d.Corners[6].To = boxPos + Vector2.new(0, height - cL)
+                        d.Corners[7].From = boxPos + Vector2.new(width, height); d.Corners[7].To = boxPos + Vector2.new(width - cL, height); d.Corners[8].From = boxPos + Vector2.new(width, height); d.Corners[8].To = boxPos + Vector2.new(width, height - cL)
+                    end
 
-                        d.HealthBar.Visible = Config.Visuals.HealthBar; d.HealthBarBG.Visible = Config.Visuals.HealthBar
-                        if Config.Visuals.HealthBar then
-                            local maxHp = math.max(char.Humanoid.MaxHealth, 1)
-                            local barH = height * (math.clamp(char.Humanoid.Health / maxHp, 0, 1))
-                            local barP = boxPos - Vector2.new(6, 0)
-                            d.HealthBarBG.Position = barP; d.HealthBarBG.Size = Vector2.new(3, height)
-                            d.HealthBar.Position = barP + Vector2.new(0, height - barH); d.HealthBar.Size = Vector2.new(3, barH)
-                            d.HealthBar.Color = Color3.fromHSV(math.clamp(char.Humanoid.Health / maxHp, 0, 1) * 0.3, 1, 1)
-                        end
+                    d.HealthBar.Visible = Config.Visuals.HealthBar; d.HealthBarBG.Visible = Config.Visuals.HealthBar
+                    if Config.Visuals.HealthBar then
+                        local maxHp = math.max(hum.MaxHealth, 1)
+                        local barH = height * math.clamp(hum.Health / maxHp, 0, 1)
+                        local barP = boxPos - Vector2.new(6, 0)
+                        d.HealthBarBG.Position = barP; d.HealthBarBG.Size = Vector2.new(3, height)
+                        d.HealthBar.Position = barP + Vector2.new(0, height - barH); d.HealthBar.Size = Vector2.new(3, barH)
+                        d.HealthBar.Color = Color3.fromHSV(math.clamp(hum.Health / maxHp, 0, 1) * 0.3, 1, 1)
+                    end
 
                         for i, l in pairs(d.Skeleton) do
                             l.Visible = Config.Visuals.Skeleton
@@ -293,32 +315,31 @@ local ESP_Connection = RunService.RenderStepped:Connect(function()
                             end
                         end
 
-                        d.Tag.Visible = Config.Visuals.NameTags
-                        if Config.Visuals.NameTags then d.Tag.Text = string.format("%s\n[%dm]", player.Name, math.floor(dist)); d.Tag.Position = Vector2.new(pos.X, boxPos.Y - 30); d.Tag.Color = Color3.new(1,1,1) end
+                    d.Tag.Visible = Config.Visuals.NameTags
+                    if Config.Visuals.NameTags then d.Tag.Text = string.format("%s\n[%dm] %dHP", player.Name, math.floor(dist), math.floor(hum.Health)); d.Tag.Position = Vector2.new(pos.X, boxPos.Y - 30); d.Tag.Color = Color3.new(1,1,1) end
 
-                        if Config.Visuals.WeaponESP then
-                            local w = char:FindFirstChildOfClass("Tool")
-                            if w then d.WeaponTag.Visible = true; d.WeaponTag.Text = w.Name; d.WeaponTag.Position = Vector2.new(pos.X, boxPos.Y + height + 2); d.WeaponTag.Color = Color3.fromRGB(200, 200, 200) else d.WeaponTag.Visible = false end
-                        else d.WeaponTag.Visible = false end
+                    if Config.Visuals.WeaponESP then
+                        local w = char:FindFirstChildOfClass("Tool")
+                        if w then d.WeaponTag.Visible = true; d.WeaponTag.Text = w.Name; d.WeaponTag.Position = Vector2.new(pos.X, boxPos.Y + height + 2); d.WeaponTag.Color = Color3.fromRGB(200, 200, 200) else d.WeaponTag.Visible = false end
+                    else d.WeaponTag.Visible = false end
 
-                        d.Tracer.Visible = Config.Visuals.Tracers
-                        if Config.Visuals.Tracers then d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y); d.Tracer.To = Vector2.new(pos.X, pos.Y); d.Tracer.Color = color end
+                    d.Tracer.Visible = Config.Visuals.Tracers
+                    if Config.Visuals.Tracers then d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y); d.Tracer.To = Vector2.new(pos.X, pos.Y); d.Tracer.Color = color end
 
-                        if Config.Visuals.Chams then
-                            if not Cache.Chams[player] then local h = Instance.new("Highlight", game:GetService("CoreGui")); h.Adornee = char; h.OutlineColor = Color3.new(1,1,1); Cache.Chams[player] = h end
-                            Cache.Chams[player].Enabled = true; Cache.Chams[player].Adornee = char; Cache.Chams[player].FillColor = color; Cache.Chams[player].FillTransparency = 0.5
-                        elseif Cache.Chams[player] then Cache.Chams[player].Enabled = false end
+                    if Config.Visuals.Chams then
+                        if not Cache.Chams[player] then local h = Instance.new("Highlight"); h.Adornee = char; h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop; h.OutlineColor = Color3.new(1,1,1); h.Parent = SafeGui; Cache.Chams[player] = h end
+                        Cache.Chams[player].Enabled = true; Cache.Chams[player].Adornee = char; Cache.Chams[player].FillColor = color; Cache.Chams[player].FillTransparency = 0.5
+                    elseif Cache.Chams[player] then Cache.Chams[player].Enabled = false end
 
-                    elseif Config.Visuals.OffScreenArrows then
-                        HideDrawings(player); d.OOF_Arrow.Visible = true; d.OOF_ArrowOutline.Visible = true
-                        local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-                        local sPos = Vector3.new(pos.X, pos.Y, pos.Z); if pos.Z < 0 then sPos = Vector3.new(-pos.X, -pos.Y, pos.Z) end
-                        local dir = (Vector2.new(sPos.X, sPos.Y) - center).Unit; local aD = 200 
-                        local aP, aB = center + (dir * (aD + 20)), center + (dir * aD)
-                        local perp = Vector2.new(-dir.Y, dir.X); local lB, rB = aB + (perp * 12), aB - (perp * 12)
-                        d.OOF_Arrow.PointA = aP; d.OOF_Arrow.PointB = lB; d.OOF_Arrow.PointC = rB; d.OOF_Arrow.Color = color
-                        d.OOF_ArrowOutline.PointA = aP; d.OOF_ArrowOutline.PointB = lB; d.OOF_ArrowOutline.PointC = rB
-                    else HideDrawings(player) end
+                elseif Config.Visuals.OffScreenArrows then
+                    HideDrawings(player); d.OOF_Arrow.Visible = true; d.OOF_ArrowOutline.Visible = true
+                    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                    local sPos = Vector3.new(pos.X, pos.Y, pos.Z); if pos.Z < 0 then sPos = Vector3.new(-pos.X, -pos.Y, pos.Z) end
+                    local dir = (Vector2.new(sPos.X, sPos.Y) - center).Unit; local aD = 200 
+                    local aP, aB = center + (dir * (aD + 20)), center + (dir * aD)
+                    local perp = Vector2.new(-dir.Y, dir.X); local lB, rB = aB + (perp * 12), aB - (perp * 12)
+                    d.OOF_Arrow.PointA = aP; d.OOF_Arrow.PointB = lB; d.OOF_Arrow.PointC = rB; d.OOF_Arrow.Color = color
+                    d.OOF_ArrowOutline.PointA = aP; d.OOF_ArrowOutline.PointB = lB; d.OOF_ArrowOutline.PointC = rB
                 else HideDrawings(player) end
             else HideDrawings(player) end
         end)
@@ -367,10 +388,14 @@ end
 
 local function IsVisible(part)
     if not Config.Combat.WallCheck then return true end
-    local ray = Camera:ViewportPointToRay(Camera:WorldToViewportPoint(part.Position).X, Camera:WorldToViewportPoint(part.Position).Y)
-    local params = RaycastParams.new(); params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}; params.FilterType = Enum.RaycastFilterType.Exclude
-    local result = Workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * Config.Combat.MaxDistance, params)
-    return result and result.Instance:IsDescendantOf(part.Parent)
+    local origin = Camera.CFrame.Position
+    local direction = (part.Position - origin)
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local result = Workspace:Raycast(origin, direction, params)
+    if not result then return true end -- Nic nie blokuje = widoczny
+    return result.Instance:IsDescendantOf(part.Parent)
 end
 
 local function GetClosest()
@@ -407,14 +432,25 @@ local AimRenderConn = RunService.RenderStepped:Connect(function()
                 local aimP = part.Position
                 if Config.Combat.AdvancedPrediction then
                     local d = (Camera.CFrame.Position - part.Position).Magnitude
-                    local t = d / math.max(Config.Combat.BulletSpeed, 1)
-                    aimP = aimP + (root.AssemblyLinearVelocity * t) + Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t ^ 2), 0)
+                    local vel = root.AssemblyLinearVelocity or Vector3.new(0,0,0)
+                    -- Clamp: ignoruj absurdalne prędkości (pojazdy, bugi)
+                    if vel.Magnitude > 100 then vel = vel.Unit * 100 end
+                    local t = math.clamp(d / math.max(Config.Combat.BulletSpeed, 500), 0, 0.5)
+                    aimP = aimP + (vel * t) + Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t * t), 0)
                 end
                 local pos, onScreen = Camera:WorldToViewportPoint(aimP)
                 if onScreen then
-                    local m = UserInputService:GetMouseLocation(); local move = (Vector2.new(pos.X, pos.Y) - m)
-                    if mousemoverel then mousemoverel(move.X * Config.Combat.Smoothness, move.Y * Config.Combat.Smoothness)
-                    else Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, aimP), Config.Combat.Smoothness) end
+                    local m = UserInputService:GetMouseLocation()
+                    local moveX = (pos.X - m.X) * Config.Combat.Smoothness
+                    local moveY = (pos.Y - m.Y) * Config.Combat.Smoothness
+                    -- Clamp ruch myszy żeby nie wyrzucało losowo
+                    moveX = math.clamp(moveX, -150, 150)
+                    moveY = math.clamp(moveY, -150, 150)
+                    if mousemoverel then
+                        mousemoverel(moveX, moveY)
+                    else
+                        Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, aimP), Config.Combat.Smoothness)
+                    end
                 else CurrentTarget = nil end
             end
         end
