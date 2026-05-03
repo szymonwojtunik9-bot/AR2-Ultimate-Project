@@ -45,7 +45,7 @@ getgenv().SolarConfig = {
         ShowFOV = true,
         FOV = 150,
         MaxDistance = 5000,
-        Smoothness = 0.15,
+        Smoothness = 2, -- Zmieniono na 2 na prośbę
         AimPart = "Head",
         WallCheck = true,
         TeamCheck = false,
@@ -155,7 +155,7 @@ CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Team Check", "TeamCheck", "Combat")
 CreateToggle(TabCbt, "Advance Physics", "AdvancedPrediction", "Combat")
 CreateToggle(TabCbt, "Auto Calibration", "AutoCalibration", "Combat")
-CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 1, true)
+CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 10, true) -- Zwiększono zakres do 10
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 800, false)
 
 local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50); UnloadBtn.Text = "WYŁĄCZ CAŁY SKRYPT I GUI"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
@@ -240,7 +240,7 @@ local ESP_Connection = RunService.RenderStepped:Connect(function()
         if not Cache.Draw[player] then CreateDrawings(player) end
         local d = Cache.Draw[player]
 
-        local success = pcall(function()
+        local success, err = pcall(function()
             local char = player.Character
             if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and (not Config.Combat.TeamCheck or player.Team ~= LocalPlayer.Team) then
                 local root = char.HumanoidRootPart; local head = char:FindFirstChild("Head")
@@ -274,11 +274,12 @@ local ESP_Connection = RunService.RenderStepped:Connect(function()
 
                         d.HealthBar.Visible = Config.Visuals.HealthBar; d.HealthBarBG.Visible = Config.Visuals.HealthBar
                         if Config.Visuals.HealthBar then
-                            local barH = height * (math.clamp(char.Humanoid.Health / char.Humanoid.MaxHealth, 0, 1))
+                            local maxHp = math.max(char.Humanoid.MaxHealth, 1)
+                            local barH = height * (math.clamp(char.Humanoid.Health / maxHp, 0, 1))
                             local barP = boxPos - Vector2.new(6, 0)
                             d.HealthBarBG.Position = barP; d.HealthBarBG.Size = Vector2.new(3, height)
                             d.HealthBar.Position = barP + Vector2.new(0, height - barH); d.HealthBar.Size = Vector2.new(3, barH)
-                            d.HealthBar.Color = Color3.fromHSV(math.clamp(char.Humanoid.Health/char.Humanoid.MaxHealth, 0, 1) * 0.3, 1, 1)
+                            d.HealthBar.Color = Color3.fromHSV(math.clamp(char.Humanoid.Health / maxHp, 0, 1) * 0.3, 1, 1)
                         end
 
                         for i, l in pairs(d.Skeleton) do
@@ -321,7 +322,7 @@ local ESP_Connection = RunService.RenderStepped:Connect(function()
                 else HideDrawings(player) end
             else HideDrawings(player) end
         end)
-        if not success then HideDrawings(player) end
+        if not success then warn("[SOLARA ESP ERROR]", err); HideDrawings(player) end
     end
 end)
 table.insert(getgenv().SolarConnections, ESP_Connection)
