@@ -216,6 +216,7 @@ CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Dynamic Part Selection", "DynamicAim", "Combat")
 CreateToggle(TabCbt, "TriggerBot", "TriggerBot", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
+CreateSlider(TabCbt, "Smoothness", "Combat", "Smoothness", 0.1, 1, true)
 CreateSlider(TabCbt, "Lead Calibration", "Combat", "PredictionMult", 0.1, 5, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
 
@@ -223,6 +224,49 @@ CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
 CreateSlider(TabMisc, "Jump Height", "Misc", "JumpPower", 50, 300, false)
 CreateToggle(TabMisc, "Vehicle Fly", "VehicleFly", "Misc")
 CreateSlider(TabMisc, "Fly Speed", "Misc", "FlySpeed", 10, 300, false)
+
+local HttpService = game:GetService("HttpService")
+local CfgName = "AR2_SolarV5_Config.json"
+
+local SaveBtn = Instance.new("TextButton", TabSet); SaveBtn.Size = UDim2.new(1, -10, 0, 45); SaveBtn.BackgroundColor3 = Config.Colors.Element; SaveBtn.Text = "ZAPISZ CONFIG"; SaveBtn.Font = Enum.Font.GothamBold; SaveBtn.TextColor3 = Color3.new(1,1,1); SaveBtn.TextSize = 14; Round(SaveBtn, 8)
+local LoadBtn = Instance.new("TextButton", TabSet); LoadBtn.Size = UDim2.new(1, -10, 0, 45); LoadBtn.BackgroundColor3 = Config.Colors.Element; LoadBtn.Text = "WCZYTAJ CONFIG"; LoadBtn.Font = Enum.Font.GothamBold; LoadBtn.TextColor3 = Color3.new(1,1,1); LoadBtn.TextSize = 14; Round(LoadBtn, 8)
+
+SaveBtn.MouseButton1Click:Connect(function()
+    if writefile then
+        local t = {Visuals=Config.Visuals, Combat=Config.Combat, Misc=Config.Misc}
+        local function clean(o)
+            local r = {}
+            for k,v in pairs(o) do
+                if typeof(v) == "EnumItem" then r[k] = "ENUM_"..tostring(v.EnumType).."_"..v.Name
+                elseif type(v) == "table" then r[k] = clean(v)
+                else r[k] = v end
+            end
+            return r
+        end
+        pcall(function() writefile(CfgName, HttpService:JSONEncode(clean(t))) end)
+    end
+end)
+
+LoadBtn.MouseButton1Click:Connect(function()
+    if readfile and isfile and isfile(CfgName) then
+        pcall(function()
+            local d = HttpService:JSONDecode(readfile(CfgName))
+            local function restore(src, dst)
+                for k,v in pairs(src) do
+                    if type(v) == "string" and v:sub(1,5) == "ENUM_" then
+                        local p = v:split("_")
+                        if #p >= 3 then pcall(function() dst[k] = Enum[p[2]][p[3]] end) end
+                    elseif type(v) == "table" and type(dst[k]) == "table" then
+                        restore(v, dst[k])
+                    else
+                        dst[k] = v
+                    end
+                end
+            end
+            restore(d, Config)
+        end)
+    end
+end)
 
 local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40); UnloadBtn.Text = "WYŁĄCZ I WYCZYŚĆ"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.new(1,1,1); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
 
@@ -604,8 +648,10 @@ local function IsVisible(targetPart)
 end
 
 local function GetClosest()
-    local target = nil; local bestPhysDist = math.huge
-    local bestVisTarget = nil; local bestVisDist = Config.Combat.FOV
+    local bestTarget = nil
+    local bestMag = Config.Combat.FOV
+    local bestPhysTarget = nil
+    local bestPhysDist = 50 -- Tylko dystans do 50m jako ostateczność (Panic Mode)
     local m = UserInputService:GetMouseLocation()
     
     for _, p in ipairs(Players:GetPlayers()) do
@@ -635,21 +681,26 @@ local function GetClosest()
                     local pos, on = Camera:WorldToViewportPoint(part.Position)
                     local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or math.huge
                     
-                    if physDist <= 50 then
-                        if physDist < bestPhysDist then target = p; bestPhysDist = physDist end
-                    else
-                        if on and vis and mag < bestVisDist then
-                            bestVisTarget = p; bestVisDist = mag
+                    -- Zawsze faworyzujemy cel na ekranie blisko celownika
+                    if on and mag < bestMag then
+                        if not Config.Combat.WallCheck or vis then
+                            bestTarget = p
+                            bestMag = mag
                         end
+                    end
+                    
+                    -- Jeśli nikt nie jest na ekranie, zapisujemy najbliższego fizycznie (<50m)
+                    if physDist < bestPhysDist then
+                        bestPhysTarget = p
+                        bestPhysDist = physDist
                     end
                 end
             end
         end
     end
     
-    if target then return target end -- Panic mode ma absolutny priorytet
-    if Config.Combat.WallCheck then return bestVisTarget end
-    return bestVisTarget or target
+    -- Zwraca cel z celownika, albo (jeśli brak) kogoś kto zaszedł nas od tyłu
+    return bestTarget or bestPhysTarget
 end
 
 table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i) if not listening and (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = true end end))
@@ -668,11 +719,16 @@ local AimLoop = RunService.RenderStepped:Connect(function()
     
     if Config.State.Aiming and Config.Combat.AimAssist then
         UpdateAim()
-        -- Zawsze szukamy najlepszego celu co klatkę (pozwala na dynamiczne przełączanie między graczami)
-        CurrentT = GetClosest()
-        
         local char = CurrentT and CurrentT.Character
         local hum  = char and char:FindFirstChild("Humanoid")
+        
+        -- TARGET LOCK: Dopóki cel żyje i trzymamy bind, nie zmieniamy celu
+        if not CurrentT or not char or not hum or hum.Health <= 0 then
+            CurrentT = GetClosest()
+        end
+        char = CurrentT and CurrentT.Character
+        hum = char and char:FindFirstChild("Humanoid")
+        
         if char and hum and hum.Health > 0 then
             -- Wybierz part do celowania (Zawsze Head jeśli widoczna)
             local part = nil
@@ -697,14 +753,21 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     local t  = d / math.max(Config.Combat.BulletSpeed, 500)
                     local vel = root.AssemblyLinearVelocity
                     if vel.Magnitude > 250 then vel = vel.Unit * 250 end
-                    -- Iteracja 1: szybkie przybliżenie pozycji
+                    
                     local pred1 = aimP + vel * t
-                    -- Iteracja 2: korygujemy czas dolotu do przewidzianej pozycji
                     local d2 = (camPos - pred1).Magnitude
                     local t2 = d2 / math.max(Config.Combat.BulletSpeed, 500)
+                    
                     local lead = vel * (t2 * Config.Combat.PredictionMult)
                     local drop = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t2 * t2), 0)
-                    aimP = aimP + lead + drop
+                    
+                    -- KOMPENSACJA SKOKU: Jeśli cel jest w powietrzu, spada z przyspieszeniem grawitacyjnym
+                    local targetGravity = Vector3.new(0, 0, 0)
+                    if hum.FloorMaterial == Enum.Material.Air then
+                        targetGravity = Vector3.new(0, 0.5 * workspace.Gravity * (t2 * t2), 0)
+                    end
+                    
+                    aimP = aimP + lead - targetGravity + drop
                 end
                 
                 local scr, on = Camera:WorldToViewportPoint(aimP)
@@ -714,10 +777,33 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     local m  = UserInputService:GetMouseLocation()
                     local dx = scr.X - m.X
                     local dy = scr.Y - m.Y
-                    -- Prosty, niezawodny ruch: clamp na 150px żeby nie przeskakiwał przez cel
-                    local mx = math.clamp(dx * Config.Combat.Smoothness, -150, 150)
-                    local my = math.clamp(dy * Config.Combat.Smoothness, -150, 150)
-                    if mousemoverel then mousemoverel(mx, my) end
+                    
+                    -- Dynamiczne wygładzanie ruchu (Dynamic Easing)
+                    local dist = math.sqrt(dx*dx + dy*dy)
+                    local dynSmooth = Config.Combat.Smoothness
+                    
+                    -- Jeśli celownik jest bardzo blisko celu (<25px), zwalniamy myszkę żeby uniknąć drgania (jitteringu)
+                    if dist < 25 then
+                        dynSmooth = dynSmooth * math.max(0.2, (dist / 25))
+                    end
+                    
+                    local mx = dx * dynSmooth
+                    local my = dy * dynSmooth
+                    
+                    -- Wymuszamy minimalny ruch 1px by dotrzeć do celu jeśli jest poza "deadzone" (1px)
+                    if dist > 1.5 then
+                        if math.abs(mx) > 0 and math.abs(mx) < 1 then mx = math.sign(dx) end
+                        if math.abs(my) > 0 and math.abs(my) < 1 then my = math.sign(dy) end
+                    else
+                        -- Celownik idealnie na głowie, nie ruszamy myszką
+                        mx, my = 0, 0
+                    end
+                    
+                    -- Hard cap na max 100px na klatkę dla płynności
+                    mx = math.clamp(mx, -100, 100)
+                    my = math.clamp(my, -100, 100)
+                    
+                    if mousemoverel and (mx ~= 0 or my ~= 0) then mousemoverel(mx, my) end
                 elseif physDist <= 50 then
                     -- CEL ZA PLECAMI (Panic Mode): Używamy CFrame żeby uniknąć wywalania myszy o 180 stopni (bug mousemoverel)
                     Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, aimP)
