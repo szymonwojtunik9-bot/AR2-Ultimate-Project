@@ -185,10 +185,15 @@ CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 1, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
 
 local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40); UnloadBtn.Text = "WYŁĄCZ I WYCZYŚĆ"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.new(1,1,1); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
+
+getgenv().FOVRing = Drawing.new("Circle")
+getgenv().FOVRing.Thickness = 1.5; getgenv().FOVRing.NumSides = 60; getgenv().FOVRing.Transparency = 0.7
+
 getgenv().UnloadSolar = function()
     Config.State.Unloaded = true
     for _, c in pairs(getgenv().SolarConnections) do pcall(function() c:Disconnect() end) end
     if ScreenGui then ScreenGui:Destroy() end
+    if getgenv().FOVRing then pcall(function() getgenv().FOVRing:Remove() end) end
     getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil
     print("[SOLARA] Wersja v5 wyczyszczona.")
 end
@@ -228,11 +233,14 @@ local function RemovePlayer(p)
     if Cache.Chams[p] then Cache.Chams[p]:Destroy(); Cache.Chams[p] = nil end
 end
 
+local frameCount = 0
 local ESP_Loop = RunService.RenderStepped:Connect(function()
     if Config.State.Unloaded then 
         for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end 
         return 
     end
+    frameCount = frameCount + 1
+    local skip = (frameCount % 2 ~= 0) -- Optymalizacja: rysowanie co 2 klatkę
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -244,31 +252,57 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
             if dist > Config.Visuals.MaxDistance then HideAll(p) continue end
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
             if onScreen then
-                local d = Cache.Draw[p]
-                local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
-                local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
-                
-                local showC = Config.Visuals.CornerBox; d.Box.Visible = not showC; d.BoxOut.Visible = not showC
-                if not showC then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
-                for i=1, 8 do d.Corners[i].Visible = showC; d.CornersOut[i].Visible = showC end
-                if showC then
-                    local cl = w/4; local c, co = d.Corners, d.CornersOut
-                    c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
-                    c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
-                    c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
-                    c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
-                    for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
+                if not skip then
+                    local d = Cache.Draw[p]
+                    local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
+                    local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                    local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
+                    
+                    local showC = Config.Visuals.CornerBox; d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
+                    if d.Box.Visible then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
+                    for i=1, 8 do d.Corners[i].Visible = Config.Visuals.BoxESP and showC; d.CornersOut[i].Visible = Config.Visuals.BoxESP and showC end
+                    if showC and Config.Visuals.BoxESP then
+                        local cl = w/4; local c, co = d.Corners, d.CornersOut
+                        c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
+                        c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
+                        c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
+                        c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
+                        for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
+                    end
+
+                    d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar
+                    if d.Health.Visible then
+                        local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
+                        d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
+                    end
+                    
+                    local showTags = Config.Visuals.NameTags
+                    d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags; d.Weapon.Visible = Config.Visuals.WeaponESP
+                    if showTags then
+                        d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
+                        d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
+                        d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
+                    end
+                    if d.Weapon.Visible then
+                        local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
+                    end
                 end
 
-                d.Health.Visible = true; d.HealthBG.Visible = true
-                local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
-                d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
-                
-                d.Tag.Visible = true; d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
-                d.Dist.Visible = true; d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
-                d.Team.Visible = true; d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
-                d.Weapon.Visible = true; local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + 26)
+                if Config.Visuals.Chams then
+                    if not Cache.Chams[p] then 
+                        local h = Instance.new("Highlight")
+                        h.Parent = SafeGui
+                        h.Adornee = char
+                        h.FillColor = Config.Colors.Enemy
+                        h.FillTransparency = 0.5
+                        h.OutlineColor = Color3.new(1,1,1)
+                        h.OutlineTransparency = 0
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        Cache.Chams[p] = h
+                    end
+                    Cache.Chams[p].Enabled = true
+                elseif Cache.Chams[p] then Cache.Chams[p].Enabled = false end
+
             else HideAll(p) end
         else HideAll(p) end
     end
@@ -279,8 +313,6 @@ Players.PlayerRemoving:Connect(RemovePlayer)
 -- ==============================================================================
 --[ AIMBOT v5 ]
 -- ==============================================================================
-local FOVRing = Drawing.new("Circle")
-FOVRing.Thickness = 1.5; FOVRing.NumSides = 60; FOVRing.Transparency = 0.7
 local CurrentT = nil
 
 local WeaponData = {
@@ -318,8 +350,15 @@ table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(fun
 table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton2 then Config.State.Aiming = false end end))
 
 local AimLoop = RunService.RenderStepped:Connect(function()
-    if Config.State.Unloaded then FOVRing:Remove() return end
-    FOVRing.Visible = Config.Combat.ShowFOV; FOVRing.Radius = Config.Combat.FOV; FOVRing.Position = UserInputService:GetMouseLocation(); FOVRing.Color = Config.Colors.Main
+    if Config.State.Unloaded then return end
+    
+    local fovRing = getgenv().FOVRing
+    if fovRing then
+        fovRing.Visible = Config.Combat.ShowFOV
+        fovRing.Radius = Config.Combat.FOV
+        fovRing.Position = UserInputService:GetMouseLocation()
+        fovRing.Color = Config.Colors.Main
+    end
     
     if Config.State.Aiming and Config.Combat.AimAssist then
         UpdateAim()
