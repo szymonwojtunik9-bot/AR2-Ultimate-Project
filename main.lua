@@ -210,10 +210,11 @@ getgenv().FOVRing.Thickness = 1.5; getgenv().FOVRing.NumSides = 60; getgenv().FO
 
 getgenv().UnloadSolar = function()
     Config.State.Unloaded = true
+    if getgenv().ClearESP then pcall(getgenv().ClearESP) end
     for _, c in pairs(getgenv().SolarConnections) do pcall(function() c:Disconnect() end) end
     if ScreenGui then ScreenGui:Destroy() end
     if getgenv().FOVRing then pcall(function() getgenv().FOVRing:Remove() end) end
-    getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil
+    getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil; getgenv().ClearESP = nil
     print("[SOLARA] Wersja v5 wyczyszczona.")
 end
 UnloadBtn.MouseButton1Click:Connect(getgenv().UnloadSolar)
@@ -246,8 +247,13 @@ end
 
 local function HideAll(p)
     local d = Cache.Draw[p]
-    if d then d.Box.Visible = false; d.BoxOut.Visible = false; for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end; d.Health.Visible = false; d.HealthBG.Visible = false; d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false end
-    if Cache.Chams[p] then Cache.Chams[p].Enabled = false end
+    if d and (d.Tag.Visible or d.Box.Visible or d.Tracer.Visible) then 
+        d.Box.Visible = false; d.BoxOut.Visible = false
+        for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end
+        d.Health.Visible = false; d.HealthBG.Visible = false
+        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false 
+    end
+    if Cache.Chams[p] and Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = false end
 end
 
 local function RemovePlayer(p)
@@ -255,82 +261,97 @@ local function RemovePlayer(p)
     if Cache.Chams[p] then Cache.Chams[p]:Destroy(); Cache.Chams[p] = nil end
 end
 
-local frameCount = 0
+getgenv().ClearESP = function()
+    for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end
+end
+
 local ESP_Loop = RunService.RenderStepped:Connect(function()
     if Config.State.Unloaded then 
         for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end 
         return 
     end
-    frameCount = frameCount + 1
-    local skip = (frameCount % 2 ~= 0) -- Optymalizacja: rysowanie co 2 klatkę
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if not Cache.Draw[p] then CreateDrawings(p) end
         local char = p.Character
-        if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-            local hum = char.Humanoid; if hum.Health <= 0 then HideAll(p) continue end
-            local root = char.HumanoidRootPart; local dist = (Camera.CFrame.Position - root.Position).Magnitude
+        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
+        local hum = char and char:FindFirstChild("Humanoid")
+        
+        if root and hum and hum.Health > 0 then
+            local dist = (Camera.CFrame.Position - root.Position).Magnitude
             if dist > Config.Visuals.MaxDistance then HideAll(p) continue end
+            
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
             if onScreen then
-                if not skip then
-                    local d = Cache.Draw[p]
-                    local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
-                    local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                    local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
-                    
-                    local showC = Config.Visuals.CornerBox; d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
-                    if d.Box.Visible then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
-                    for i=1, 8 do d.Corners[i].Visible = Config.Visuals.BoxESP and showC; d.CornersOut[i].Visible = Config.Visuals.BoxESP and showC end
-                    if showC and Config.Visuals.BoxESP then
-                        local cl = w/4; local c, co = d.Corners, d.CornersOut
-                        c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
-                        c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
-                        c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
-                        c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
-                        for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
-                    end
-
-                    d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar
-                    if d.Health.Visible then
-                        local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
-                        d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
-                    end
-                    
-                    local showTags = Config.Visuals.NameTags
-                    d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags; d.Weapon.Visible = Config.Visuals.WeaponESP
-                    if showTags then
-                        d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
-                        d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
-                        d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
-                    end
-                    if d.Weapon.Visible then
-                        local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
-                    end
-
-                    d.Tracer.Visible = Config.Visuals.Tracers
-                    if d.Tracer.Visible then
-                        d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
-                        d.Tracer.To = Vector2.new(pos.X, bPos.Y + h)
-                        d.Tracer.Color = (CurrentT == p) and Color3.new(0, 1, 0) or Color3.new(1, 1, 1)
-                    end
+                local d = Cache.Draw[p]
+                local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
+                local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
+                
+                local showC = Config.Visuals.CornerBox
+                if d.Box.Visible ~= (Config.Visuals.BoxESP and not showC) then
+                    d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
+                end
+                
+                if d.Box.Visible then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
+                
+                local cVis = Config.Visuals.BoxESP and showC
+                if d.Corners[1].Visible ~= cVis then
+                    for i=1, 8 do d.Corners[i].Visible = cVis; d.CornersOut[i].Visible = cVis end
+                end
+                
+                if cVis then
+                    local cl = w/4; local c, co = d.Corners, d.CornersOut
+                    c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
+                    c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
+                    c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
+                    c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
+                    for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
                 end
 
-                if Config.Visuals.Chams then
+                if d.Health.Visible ~= Config.Visuals.HealthBar then d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar end
+                if d.Health.Visible then
+                    local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
+                    d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
+                end
+                
+                local showTags = Config.Visuals.NameTags
+                if d.Tag.Visible ~= showTags then d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags end
+                if d.Weapon.Visible ~= Config.Visuals.WeaponESP then d.Weapon.Visible = Config.Visuals.WeaponESP end
+                
+                if showTags then
+                    d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
+                    d.Dist.Text = math.floor(dist) .. "m"; d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
+                    d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
+                end
+                if d.Weapon.Visible then
+                    local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
+                end
+
+                if d.Tracer.Visible ~= Config.Visuals.Tracers then d.Tracer.Visible = Config.Visuals.Tracers end
+                if d.Tracer.Visible then
+                    d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                    d.Tracer.To = Vector2.new(pos.X, bPos.Y + h)
+                    d.Tracer.Color = (CurrentT == p) and Color3.new(0, 1, 0) or Color3.new(1, 1, 1)
+                end
+
+                if Config.Visuals.Chams and dist < 800 then
                     if not Cache.Chams[p] then 
-                        local h = Instance.new("Highlight")
-                        h.Parent = SafeGui
-                        h.Adornee = char
-                        h.FillColor = Config.Colors.Enemy
-                        h.FillTransparency = 0.5
-                        h.OutlineColor = Color3.new(1,1,1)
-                        h.OutlineTransparency = 0
-                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        Cache.Chams[p] = h
+                        local hInst = Instance.new("Highlight")
+                        hInst.Parent = SafeGui
+                        hInst.Adornee = char
+                        hInst.FillColor = Config.Colors.Enemy
+                        hInst.FillTransparency = 0.5
+                        hInst.OutlineColor = Color3.new(1,1,1)
+                        hInst.OutlineTransparency = 0
+                        hInst.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        Cache.Chams[p] = hInst
                     end
-                    Cache.Chams[p].Enabled = true
-                elseif Cache.Chams[p] then Cache.Chams[p].Enabled = false end
+                    if not Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = true end
+                elseif Cache.Chams[p] and Cache.Chams[p].Enabled then 
+                    Cache.Chams[p].Enabled = false 
+                end
 
             else HideAll(p) end
         else HideAll(p) end
@@ -361,13 +382,18 @@ end
 local function GetClosest()
     local target = nil; local dist = Config.Combat.FOV; local m = UserInputService:GetMouseLocation()
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character.Humanoid.Health > 0 then
-            local part = p.Character:FindFirstChild(Config.Combat.AimPart)
-            if part then
-                local pos, on = Camera:WorldToViewportPoint(part.Position)
-                if on then
-                    local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
-                    if mag < dist then target = p; dist = mag end
+        if p ~= LocalPlayer then
+            local char = p.Character
+            local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
+            local hum = char and char:FindFirstChild("Humanoid")
+            if root and hum and hum.Health > 0 then
+                local part = char:FindFirstChild(Config.Combat.AimPart)
+                if part then
+                    local pos, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
+                        if mag < dist then target = p; dist = mag end
+                    end
                 end
             end
         end
