@@ -43,15 +43,18 @@ getgenv().SolarConfig = {
         CornerBox = true,
         NameTags = true,
         HealthBar = true,
-        Skeleton = false, -- Domyślnie wyłączone dla FPS
+        Skeleton = false,
         WeaponESP = true,
         Tracers = false,
         OffScreenArrows = true,
         Chams = true,
+        HeliESP = true,
+        HeliTracers = true,
+        HeliMaxDistance = 5000,
         MaxDistance = 3000,
         MinDistance = 0,
         Crosshair = true,
-        ESP_FPS_Limit = 1 -- Limit odświeżania (klatki)
+        ESP_FPS_Limit = 1
     },
     Combat = {
         AimAssist = true,
@@ -202,6 +205,8 @@ CreateToggle(TabVis, "Weapon ESP", "WeaponESP", "Visuals")
 CreateToggle(TabVis, "Tracers", "Tracers", "Visuals")
 CreateToggle(TabVis, "Off-Screen Arrows", "OffScreenArrows", "Visuals")
 CreateToggle(TabVis, "Chams (Highlight)", "Chams", "Visuals")
+CreateToggle(TabVis, "Helicopter ESP", "HeliESP", "Visuals")
+CreateToggle(TabVis, "Heli Tracers", "HeliTracers", "Visuals")
 CreateSlider(TabVis, "Max Distance", "Visuals", "MaxDistance", 100, 10000, false)
 
 CreateToggle(TabCbt, "Aimbot", "AimAssist", "Combat")
@@ -554,34 +559,95 @@ table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(fun
     if input.KeyCode == Enum.KeyCode.Space and Config.Misc.HighJump and not Config.State.Unloaded then
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
-        if root then
+        local hum = char and char:FindFirstChild("Humanoid")
+        if root and hum and hum.FloorMaterial ~= Enum.Material.Air then
             root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, Config.Misc.JumpPower, root.AssemblyLinearVelocity.Z)
         end
     end
 end))
 
+-- Obiekty fizyczne do lotu pojazdu (tworzone/usuwane dynamicznie)
+local FlyBV = nil  -- BodyVelocity - kontroluje prędkość
+local FlyBG = nil  -- BodyGyro - stabilizuje rotację (nie dachuje)
+local FlyTarget = nil -- Aktualny PrimaryPart pojazdu
+
+local function DestroyFlyObjects()
+    if FlyBV then pcall(function() FlyBV:Destroy() end); FlyBV = nil end
+    if FlyBG then pcall(function() FlyBG:Destroy() end); FlyBG = nil end
+    FlyTarget = nil
+end
+
+local function CreateFlyObjects(root)
+    if FlyTarget == root then return end
+    DestroyFlyObjects()
+    FlyTarget = root
+    
+    -- BodyVelocity: MaxForce = 9e9 żeby masa pojazdu nie ściągała w dół
+    FlyBV = Instance.new("BodyVelocity")
+    FlyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    FlyBV.Velocity = Vector3.new(0, 0, 0)
+    FlyBV.P = 9e4 -- Siła proporcjonalna - wystarczająca do szybkiej odpowiedzi
+    FlyBV.Parent = root
+    
+    -- BodyGyro: blokuje rotację samochodu, żeby nie dachował
+    FlyBG = Instance.new("BodyGyro")
+    FlyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    FlyBG.P = 9e4
+    FlyBG.D = 1000 -- Tłumienie oscylacji
+    FlyBG.CFrame = root.CFrame -- Zamraża aktualną orientację
+    FlyBG.Parent = root
+end
+
 local MiscLoop = RunService.Heartbeat:Connect(function()
-    if Config.State.Unloaded then return end
+    if Config.State.Unloaded then DestroyFlyObjects(); return end
+    
     if Config.Misc.VehicleFly then
         local char = LocalPlayer.Character
         local hum = char and char:FindFirstChild("Humanoid")
+        
+        -- Sprawdzamy czy gracz siedzi w aucie (VehicleSeat)
         if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
             local vehicle = hum.SeatPart:FindFirstAncestorOfClass("Model")
-            local root = vehicle and vehicle.PrimaryPart or hum.SeatPart
+            local root = vehicle and (vehicle.PrimaryPart or hum.SeatPart) or hum.SeatPart
+            
             if root then
+                CreateFlyObjects(root)
+                
                 local cam = Workspace.CurrentCamera
-                local md = Vector3.new()
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then md = md + cam.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then md = md - cam.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then md = md - cam.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then md = md + cam.CFrame.RightVector end
-                if md.Magnitude > 0 then md = md.Unit end
-                local vel = md * Config.Misc.FlySpeed
-                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then vel = vel + Vector3.new(0, Config.Misc.FlySpeed, 0) end
-                if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then vel = vel - Vector3.new(0, Config.Misc.FlySpeed, 0) end
-                if vel.Magnitude > 0 then root.AssemblyLinearVelocity = vel else root.AssemblyLinearVelocity = Vector3.new(0,0,0) end
+                -- Usuwamy składową pionową z wektorów kamery (płaski ruch poziomy)
+                local lookFlat = Vector3.new(cam.CFrame.LookVector.X, 0, cam.CFrame.LookVector.Z).Unit
+                local rightFlat = Vector3.new(cam.CFrame.RightVector.X, 0, cam.CFrame.RightVector.Z).Unit
+                
+                local moveDir = Vector3.new()
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + lookFlat end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - lookFlat end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - rightFlat end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + rightFlat end
+                
+                -- Normalizacja kierunku poziomego jeśli jest ruch
+                if moveDir.Magnitude > 0 then moveDir = moveDir.Unit end
+                
+                local targetVel = moveDir * Config.Misc.FlySpeed
+                -- Ruch pionowy
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                    targetVel = targetVel + Vector3.new(0, Config.Misc.FlySpeed, 0)
+                end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+                    targetVel = targetVel - Vector3.new(0, Config.Misc.FlySpeed, 0)
+                end
+                
+                -- Aktualizacja BodyVelocity
+                if FlyBV then FlyBV.Velocity = targetVel end
+                -- Zamrożenie rotacji - BodyGyro utrzymuje poziomą orientację
+                if FlyBG then FlyBG.CFrame = CFrame.new(root.Position) end
             end
+        else
+            -- Gracz wysiadł lub nigdy nie siedział w aucie - czyścimy obiekty
+            if FlyBV or FlyBG then DestroyFlyObjects() end
         end
+    else
+        -- Tryb wyłączony - usuwamy obiekty fizyczne
+        if FlyBV or FlyBG then DestroyFlyObjects() end
     end
 end)
 table.insert(getgenv().SolarConnections, MiscLoop)
@@ -609,6 +675,167 @@ local TriggerLoop = RunService.RenderStepped:Connect(function()
     end
 end)
 table.insert(getgenv().SolarConnections, TriggerLoop)
+
+-- ==============================================================================
+--[ HELICOPTER ESP v5 ]
+-- ==============================================================================
+
+-- Słowa kluczowe identyfikujące helikoptery w grze
+local HELI_KEYWORDS = {"Helicopter", "Heli", "Chopper", "Aircraft", "UH", "Blackhawk"}
+-- Słowa kluczowe dla militarnych/czarnych helikopterów
+local MILITARY_KEYWORDS = {"Black", "Military", "Armed", "Combat", "Attack"}
+
+-- Cache rysunków helikopterów
+local HeliCache = {}
+
+-- Sprawdza czy model jest helikopterem na podstawie nazwy
+local function IsHelicopter(model)
+    local name = model.Name:lower()
+    for _, kw in ipairs(HELI_KEYWORDS) do
+        if name:find(kw:lower()) then return true end
+    end
+    return false
+end
+
+-- Sprawdza czy helikopter jest militarny
+local function IsMilitary(model)
+    local name = model.Name:lower()
+    for _, kw in ipairs(MILITARY_KEYWORDS) do
+        if name:find(kw:lower()) then return true end
+    end
+    return false
+end
+
+-- Tworzy obiekty Drawing dla helikoptera
+local function CreateHeliDrawings(heli)
+    local d = {
+        Box    = Drawing.new("Square"),
+        BoxOut = Drawing.new("Square"),
+        Label  = Drawing.new("Text"),
+        Dist   = Drawing.new("Text"),
+        Tracer = Drawing.new("Line"),
+    }
+    d.Box.Thickness = 1; d.Box.Filled = false
+    d.BoxOut.Thickness = 3; d.BoxOut.Filled = false; d.BoxOut.Color = Color3.new(0,0,0)
+    d.Label.Size = 14; d.Label.Center = true; d.Label.Outline = true; d.Label.Font = 2
+    d.Dist.Size = 12; d.Dist.Center = true; d.Dist.Outline = true; d.Dist.Font = 2; d.Dist.Color = Color3.fromRGB(255, 215, 0)
+    d.Tracer.Thickness = 1
+    HeliCache[heli] = d
+end
+
+-- Usuwa rysunki helikoptera
+local function RemoveHeliDrawings(heli)
+    if HeliCache[heli] then
+        for _, v in pairs(HeliCache[heli]) do pcall(function() v:Remove() end) end
+        HeliCache[heli] = nil
+    end
+end
+
+-- Ukrywa rysunki bez usuwania (optymalizacja)
+local function HideHeliDrawings(heli)
+    local d = HeliCache[heli]
+    if d then
+        for _, v in pairs(d) do
+            if type(v) ~= "table" and v.Visible then v.Visible = false end
+        end
+    end
+end
+
+-- Główna pętla Helicopter ESP
+local HeliESP_Loop = RunService.RenderStepped:Connect(function()
+    if Config.State.Unloaded then
+        for heli, _ in pairs(HeliCache) do RemoveHeliDrawings(heli) end
+        return
+    end
+
+    -- Budujemy zestaw aktywnych helikopterów z Workspace
+    local activeHelis = {}
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and IsHelicopter(obj) then
+            activeHelis[obj] = true
+        end
+    end
+    -- Sprawdź też Workspace.Vehicles jeśli istnieje
+    local vehicleFolder = Workspace:FindFirstChild("Vehicles")
+    if vehicleFolder then
+        for _, obj in ipairs(vehicleFolder:GetChildren()) do
+            if obj:IsA("Model") and IsHelicopter(obj) then
+                activeHelis[obj] = true
+            end
+        end
+    end
+
+    -- Wyczyść helikoptery, które zniknęły z mapy (eksplodowały)
+    for heli, _ in pairs(HeliCache) do
+        if not activeHelis[heli] or not heli.Parent then
+            RemoveHeliDrawings(heli)
+        end
+    end
+
+    if not Config.Visuals.HeliESP then
+        for heli, _ in pairs(HeliCache) do HideHeliDrawings(heli) end
+        return
+    end
+
+    local camPos = Camera.CFrame.Position
+    local vp = Camera.ViewportSize
+
+    for heli, _ in pairs(activeHelis) do
+        -- Utwórz cache jeśli nie istnieje
+        if not HeliCache[heli] then CreateHeliDrawings(heli) end
+        local d = HeliCache[heli]
+
+        local root = heli.PrimaryPart or heli:FindFirstChildWhichIsA("BasePart")
+        if not root then HideHeliDrawings(heli); continue end
+
+        local dist = (root.Position - camPos).Magnitude
+        if dist > Config.Visuals.HeliMaxDistance then HideHeliDrawings(heli); continue end
+
+        local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+        if not onScreen then HideHeliDrawings(heli); continue end
+
+        -- Kolor zależny od typu: militarny = fiolet, normalny = zielony
+        local heliColor = IsMilitary(heli)
+            and Color3.fromRGB(180, 0, 255)  -- Głęboki fiolet dla militarnych
+            or  Color3.fromRGB(0, 255, 80)   -- Jasny zielony dla cywilnych
+
+        -- Oblicz rozmiar boxa ESP na podstawie dystansu
+        local size = math.clamp(1500 / dist, 20, 300)
+        local w = size * 1.6
+        local h = size
+        local bPos = Vector2.new(pos.X - w/2, pos.Y - h/2)
+
+        -- Rysuj Box
+        d.BoxOut.Visible = true
+        d.BoxOut.Position = bPos
+        d.BoxOut.Size = Vector2.new(w, h)
+        d.Box.Visible = true
+        d.Box.Position = bPos
+        d.Box.Size = Vector2.new(w, h)
+        d.Box.Color = heliColor
+
+        -- Etykieta z nazwą
+        d.Label.Visible = true
+        d.Label.Text = "🚁 " .. heli.Name
+        d.Label.Position = Vector2.new(pos.X, bPos.Y - 18)
+        d.Label.Color = heliColor
+
+        -- Dystans
+        d.Dist.Visible = true
+        d.Dist.Text = math.floor(dist) .. "m"
+        d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
+
+        -- Tracer od dołu ekranu do helikoptera
+        d.Tracer.Visible = Config.Visuals.HeliTracers
+        if d.Tracer.Visible then
+            d.Tracer.From = Vector2.new(vp.X / 2, vp.Y)
+            d.Tracer.To = Vector2.new(pos.X, pos.Y)
+            d.Tracer.Color = heliColor
+            d.Tracer.Thickness = 1
+        end
+    end
+end)
+table.insert(getgenv().SolarConnections, HeliESP_Loop)
 
 print("========================================")
 print("   SOLARA AR2 ELITE v5 ZAŁADOWANA!   ")
