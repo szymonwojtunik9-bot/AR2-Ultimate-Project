@@ -1049,15 +1049,15 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                         my = math.clamp(my, -100, 100)
                     end
                     
-                    -- Legit RCS: Jeśli strzelasz, dodajemy dodatkowy ruch w dół
-                    if Config.Combat.LegitRCS and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                        my = my + Config.Combat.RCSStrength
-                    end
                     
                     if mousemoverel and (mx ~= 0 or my ~= 0) then mousemoverel(mx, my) end
                 elseif physDist <= 50 then
-                    -- CEL ZA PLECAMI (Panic Mode): Używamy CFrame żeby uniknąć wywalania myszy o 180 stopni (bug mousemoverel)
-                    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, aimP)
+                    -- Panic Mode (bezpośredni obrót myszy dla bliskich celów)
+                    local m = UserInputService:GetMouseLocation()
+                    local scr, on = Camera:WorldToViewportPoint(aimP)
+                    if on then
+                        mousemoverel(scr.X - m.X, scr.Y - m.Y)
+                    end
                 else
                     CurrentT = nil
                 end
@@ -1065,6 +1065,13 @@ local AimLoop = RunService.RenderStepped:Connect(function()
         end
     else
         CurrentT = nil
+    end
+    
+    -- LEGIT RCS (Działa zawsze podczas strzelania, nawet bez celu)
+    if Config.Combat.LegitRCS and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and not UserInputService:GetFocusedTextBox() then
+        if mousemoverel then
+            mousemoverel(0, Config.Combat.RCSStrength)
+        end
     end
 end)
 table.insert(getgenv().SolarConnections, AimLoop)
