@@ -118,6 +118,8 @@ local OriginalLighting = {
     OutdoorAmbient = game:GetService("Lighting").OutdoorAmbient
 }
 local OriginalHeadSizes = {}
+local OriginalHeadColors = {}
+local OriginalHeadMats = {}
 
 -- ==============================================================================
 --[ UI v5 ]
@@ -730,12 +732,23 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                 local head = p.Character:FindFirstChild("Head")
                 if head then
                     if Config.Misc.ExpandHitbox then
-                        if not OriginalHeadSizes[p] then OriginalHeadSizes[p] = head.Size end
+                        if not OriginalHeadSizes[p] then 
+                            OriginalHeadSizes[p] = head.Size 
+                            OriginalHeadColors[p] = head.Color
+                            OriginalHeadMats[p] = head.Material
+                        end
                         head.Size = Vector3.new(Config.Misc.HitboxSize, Config.Misc.HitboxSize, Config.Misc.HitboxSize)
-                        head.Transparency = 0.5; head.CanCollide = false
+                        head.Transparency = 0.6
+                        head.Color = Color3.fromRGB(255, 0, 0) -- Jaskrawy czerwony
+                        head.Material = Enum.Material.Neon
+                        head.CanCollide = false
                     else
                         if OriginalHeadSizes[p] then
-                            head.Size = OriginalHeadSizes[p]; head.Transparency = 0; head.CanCollide = true
+                            head.Size = OriginalHeadSizes[p]
+                            head.Transparency = 0
+                            head.Color = OriginalHeadColors[p]
+                            head.Material = OriginalHeadMats[p]
+                            head.CanCollide = true
                         end
                     end
                 end
@@ -1216,8 +1229,10 @@ local MiscLoop = RunService.Heartbeat:Connect(function()
                 
                 -- Aktualizacja BodyVelocity
                 if FlyBV then FlyBV.Velocity = targetVel end
-                -- Zamrożenie rotacji - BodyGyro utrzymuje poziomą orientację
-                if FlyBG then FlyBG.CFrame = CFrame.new(root.Position) end
+                -- Orientacja: Auto zawsze "patrzy" tam gdzie kamera (horyzontalnie)
+                if FlyBG then 
+                    FlyBG.CFrame = CFrame.lookAt(root.Position, root.Position + lookFlat) 
+                end
             end
         else
             -- Gracz wysiadł lub nigdy nie siedział w aucie - czyścimy obiekty
