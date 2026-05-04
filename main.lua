@@ -59,7 +59,7 @@ getgenv().SolarConfig = {
         ShowFOV = true,
         FOV = 150,
         MaxDistance = 3000,
-        Smoothness = 0.4,
+        Smoothness = 1,
         AimPart = "Head",
         WallCheck = true,
         TeamCheck = false,
@@ -67,6 +67,12 @@ getgenv().SolarConfig = {
         AutoCalibration = true,
         BulletSpeed = 2500,
         BulletGravity = 196.2
+    },
+    Misc = {
+        HighJump = false,
+        JumpPower = 50,
+        VehicleFly = false,
+        FlySpeed = 50
     },
     Colors = {
         Main = Color3.fromRGB(138, 43, 226),
@@ -183,7 +189,7 @@ local function CreateKeybind(p, t, c, k)
     end))
 end
 
-local TabVis = CreateTab("Visuals"); local TabCbt = CreateTab("Combat"); local TabSet = CreateTab("Settings"); SelectTab("Visuals")
+local TabVis = CreateTab("Visuals"); local TabCbt = CreateTab("Combat"); local TabMisc = CreateTab("Misc"); local TabSet = CreateTab("Settings"); SelectTab("Visuals")
 
 CreateToggle(TabVis, "Boxes", "BoxESP", "Visuals")
 CreateToggle(TabVis, "Health Bar", "HealthBar", "Visuals")
@@ -200,8 +206,12 @@ CreateKeybind(TabCbt, "Aim Key", "Combat", "AimKey")
 CreateToggle(TabCbt, "Show FOV", "ShowFOV", "Combat")
 CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
-CreateSlider(TabCbt, "Aim Smooth", "Combat", "Smoothness", 0.01, 1, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
+
+CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
+CreateSlider(TabMisc, "Jump Height", "Misc", "JumpPower", 50, 300, false)
+CreateToggle(TabMisc, "Vehicle Fly", "VehicleFly", "Misc")
+CreateSlider(TabMisc, "Fly Speed", "Misc", "FlySpeed", 10, 300, false)
 
 local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40); UnloadBtn.Text = "WYŁĄCZ I WYCZYŚĆ"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.new(1,1,1); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
 
@@ -422,8 +432,10 @@ local function GetClosest()
                 local part = char:FindFirstChild(Config.Combat.AimPart)
                 if part then
                     local pos, on = Camera:WorldToViewportPoint(part.Position)
-                    if on then
-                        local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
+                    local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                    if on or physDist <= 50 then
+                        local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or Config.Combat.FOV
+                        if physDist <= 50 then mag = physDist - 1000 end
                         if mag < Config.Combat.FOV then
                             local visible = IsVisible(part)
                             if visible then
@@ -432,7 +444,6 @@ local function GetClosest()
                                     bestVisDist = mag
                                 end
                             else
-                                local physDist = (root.Position - Camera.CFrame.Position).Magnitude
                                 if physDist < bestPhysDist then
                                     target = p
                                     bestPhysDist = physDist
@@ -491,6 +502,43 @@ local AimLoop = RunService.RenderStepped:Connect(function()
     else CurrentT = nil end
 end)
 table.insert(getgenv().SolarConnections, AimLoop)
+
+table.insert(getgenv().SolarConnections, UserInputService.JumpRequest:Connect(function()
+    if Config.Misc.HighJump and not Config.State.Unloaded then
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChild("Humanoid")
+        if root and hum and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+            root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, Config.Misc.JumpPower, root.AssemblyLinearVelocity.Z)
+        end
+    end
+end))
+
+local MiscLoop = RunService.Heartbeat:Connect(function()
+    if Config.State.Unloaded then return end
+    if Config.Misc.VehicleFly then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChild("Humanoid")
+        if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
+            local vehicle = hum.SeatPart:FindFirstAncestorOfClass("Model")
+            local root = vehicle and vehicle.PrimaryPart or hum.SeatPart
+            if root then
+                local cam = Workspace.CurrentCamera
+                local md = Vector3.new()
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then md = md + cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then md = md - cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then md = md - cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then md = md + cam.CFrame.RightVector end
+                if md.Magnitude > 0 then md = md.Unit end
+                local vel = md * Config.Misc.FlySpeed
+                if UserInputService:IsKeyDown(Enum.KeyCode.Space) then vel = vel + Vector3.new(0, Config.Misc.FlySpeed, 0) end
+                if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then vel = vel - Vector3.new(0, Config.Misc.FlySpeed, 0) end
+                if vel.Magnitude > 0 then root.AssemblyLinearVelocity = vel else root.AssemblyLinearVelocity = Vector3.new(0,0,0) end
+            end
+        end
+    end
+end)
+table.insert(getgenv().SolarConnections, MiscLoop)
 
 print("========================================")
 print("   SOLARA AR2 ELITE v5 ZAŁADOWANA!   ")
