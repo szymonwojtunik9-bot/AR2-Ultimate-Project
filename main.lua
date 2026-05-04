@@ -409,7 +409,7 @@ local function IsVisible(targetPart)
 end
 
 local function GetClosest()
-    local target = nil; local dist = Config.Combat.FOV
+    local target = nil; local bestPhysDist = math.huge
     local bestVisTarget = nil; local bestVisDist = Config.Combat.FOV
     local m = UserInputService:GetMouseLocation()
     
@@ -426,13 +426,17 @@ local function GetClosest()
                         local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
                         if mag < Config.Combat.FOV then
                             local visible = IsVisible(part)
-                            if visible and mag < bestVisDist then
-                                bestVisTarget = p
-                                bestVisDist = mag
-                            end
-                            if mag < dist then
-                                target = p
-                                dist = mag
+                            if visible then
+                                if mag < bestVisDist then
+                                    bestVisTarget = p
+                                    bestVisDist = mag
+                                end
+                            else
+                                local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                                if physDist < bestPhysDist then
+                                    target = p
+                                    bestPhysDist = physDist
+                                end
                             end
                         end
                     end
