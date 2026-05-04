@@ -110,6 +110,15 @@ local Config = getgenv().SolarConfig
 local function Tween(obj, props, time) TweenService:Create(obj, TweenInfo.new(time or 0.2), props):Play() end
 local function Round(obj, r) local c = Instance.new("UICorner", obj); c.CornerRadius = UDim.new(0, r or 6); return c end
 
+-- Cache oryginalnych ustawień (do resetu)
+local OriginalLighting = {
+    Brightness = game:GetService("Lighting").Brightness,
+    ClockTime = game:GetService("Lighting").ClockTime,
+    GlobalShadows = game:GetService("Lighting").GlobalShadows,
+    OutdoorAmbient = game:GetService("Lighting").OutdoorAmbient
+}
+local OriginalHeadSizes = {}
+
 -- ==============================================================================
 --[ UI v5 ]
 -- ==============================================================================
@@ -307,6 +316,13 @@ getgenv().UnloadSolar = function()
     for _, c in pairs(getgenv().SolarConnections) do pcall(function() c:Disconnect() end) end
     if ScreenGui then ScreenGui:Destroy() end
     if getgenv().FOVRing then pcall(function() getgenv().FOVRing:Remove() end) end
+    if CrossLines then for _, l in pairs(CrossLines) do pcall(function() l:Remove() end) end end
+    
+    -- Przywracanie oświetlenia
+    game:GetService("Lighting").Brightness = OriginalLighting.Brightness
+    game:GetService("Lighting").ClockTime = OriginalLighting.ClockTime
+    game:GetService("Lighting").GlobalShadows = OriginalLighting.GlobalShadows
+    game:GetService("Lighting").OutdoorAmbient = OriginalLighting.OutdoorAmbient
     getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil; getgenv().ClearESP = nil
     print("[SOLARA] Wersja v5 wyczyszczona.")
 end
@@ -316,7 +332,14 @@ table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(fun
 -- ==============================================================================
 --[ LOGIKA ESP v5 (ULTRA OPTIMIZED) ]
 -- ==============================================================================
-local CurrentT = nil -- Definicja CurrentT wyżej, by tracery widziały target
+local CurrentT = nil 
+getgenv().FOVRing = Drawing.new("Circle")
+getgenv().FOVRing.Thickness = 1
+getgenv().FOVRing.NumSides = 64
+getgenv().FOVRing.Filled = false
+getgenv().FOVRing.Transparency = 1
+getgenv().FOVRing.Visible = false
+
 local Cache = { Draw = {}, Chams = {} }
 local SkeletonConns = {{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}}
 
@@ -384,11 +407,23 @@ local ItemESPLoop = RunService.RenderStepped:Connect(function()
         return
     end
 
-    -- Skanowanie przedmiotów co sekundę (oszczędność wydajności)
-    if tick() % 1 < 0.05 then
+    -- Skanowanie przedmiotów (oszczędność wydajności: co 2 sekundy pełny skan)
+    if tick() % 2 < 0.05 then
         for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj.Name == "AUG" and not ItemCache[obj] then
-                CreateItemDrawing(obj)
+            -- Szukamy "AUG" ale ignorujemy te, które gracze trzymają w rękach
+            local name = obj.Name:lower()
+            if (name:find("aug") or name:find("steyr")) and not ItemCache[obj] then
+                -- Sprawdzamy czy to nie jest broń w ręku gracza
+                local isHeld = false
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p.Character and obj:IsDescendantOf(p.Character) then
+                        isHeld = true; break
+                    end
+                end
+                
+                if not isHeld then
+                    CreateItemDrawing(obj)
+                end
             end
         end
     end
@@ -397,6 +432,17 @@ local ItemESPLoop = RunService.RenderStepped:Connect(function()
         if not item or not item.Parent then
             draw:Remove()
             ItemCache[item] = nil
+            continue
+        end
+        
+        -- Ukrywamy jeśli ktoś podniósł przedmiot (jest wewnątrz postaci)
+        local isHeld = false
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Character and item:IsDescendantOf(p.Character) then isHeld = true; break end
+        end
+
+        if isHeld then
+            draw.Visible = false
             continue
         end
 
@@ -657,6 +703,9 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
         game:GetService("Lighting").ClockTime = 14
         game:GetService("Lighting").GlobalShadows = false
         game:GetService("Lighting").OutdoorAmbient = Color3.new(1,1,1)
+    else
+        game:GetService("Lighting").Brightness = OriginalLighting.Brightness
+        game:GetService("Lighting").GlobalShadows = OriginalLighting.GlobalShadows
     end
     
     -- CROSSHAIR Logic
@@ -675,14 +724,20 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
     ScreenGui.DisplayOrder = Config.Misc.Streamproof and -100 or 10
     
     -- HITBOX EXPANDER Logic
-    if slowTick and Config.Misc.ExpandHitbox then
+    if slowTick then
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character then
                 local head = p.Character:FindFirstChild("Head")
                 if head then
-                    head.Size = Vector3.new(Config.Misc.HitboxSize, Config.Misc.HitboxSize, Config.Misc.HitboxSize)
-                    head.Transparency = 0.5
-                    head.CanCollide = false
+                    if Config.Misc.ExpandHitbox then
+                        if not OriginalHeadSizes[p] then OriginalHeadSizes[p] = head.Size end
+                        head.Size = Vector3.new(Config.Misc.HitboxSize, Config.Misc.HitboxSize, Config.Misc.HitboxSize)
+                        head.Transparency = 0.5; head.CanCollide = false
+                    else
+                        if OriginalHeadSizes[p] then
+                            head.Size = OriginalHeadSizes[p]; head.Transparency = 0; head.CanCollide = true
+                        end
+                    end
                 end
             end
         end
@@ -806,13 +861,16 @@ _rayParams.IgnoreWater = true
 
 local function IsVisible(targetPart)
     if not targetPart then return false end
-    -- Aktualizujemy listę filtrów (character może się zmienić)
+    -- Optymalizacja: Ignore list zawiera naszą postać i całe modele graczy by uniknąć trafiania w ich akcesoria
     _rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     local rayOrigin = Camera.CFrame.Position
     local rayDir = (targetPart.Position - rayOrigin)
     local result = Workspace:Raycast(rayOrigin, rayDir, _rayParams)
+    
     if result then
-        return result.Instance:IsDescendantOf(targetPart.Parent)
+        local hit = result.Instance
+        -- Jeśli trafiliśmy w coś, co należy do celu - jest widoczny
+        return hit:IsDescendantOf(targetPart.Parent)
     end
     return true
 end
@@ -873,7 +931,11 @@ local function GetClosest()
     return bestTarget or bestPhysTarget
 end
 
-table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i) if not listening and (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = true end end))
+table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i, g) 
+    if not g and (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then 
+        Config.State.Aiming = true 
+    end 
+end))
 table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i) if (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = false end end))
 
 local AimLoop = RunService.RenderStepped:Connect(function()
@@ -946,10 +1008,9 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                 local scr, on = Camera:WorldToViewportPoint(aimP)
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
                 
-                -- Jeśli uzywamy Silent Aim, omijamy przesuwanie myszki z AimLoop
+                -- Jeśli uzywamy Silent Aim, aktualizujemy tylko pozycję kuli, ale NIE przerywamy Aim Assist (ruch myszką nadal działa)
                 if Config.Combat.SilentAim then
-                    -- Silent Aim załatwi to przez hooka, tu tylko celownik/obliczenia są potrzebne
-                    return
+                    -- Silent Aim załatwi to przez hooka
                 end
                 
                 if on then
