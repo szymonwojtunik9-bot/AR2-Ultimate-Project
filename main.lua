@@ -64,6 +64,7 @@ getgenv().SolarConfig = {
         WallCheck = true,
         TeamCheck = false,
         AdvancedPrediction = true,
+        PredictionMult = 1,
         AutoCalibration = true,
         BulletSpeed = 2500,
         BulletGravity = 196.2
@@ -206,6 +207,7 @@ CreateKeybind(TabCbt, "Aim Key", "Combat", "AimKey")
 CreateToggle(TabCbt, "Show FOV", "ShowFOV", "Combat")
 CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
+CreateSlider(TabCbt, "Prediction Mult", "Combat", "PredictionMult", 0.1, 5, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
 
 CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
@@ -488,7 +490,7 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     local d = (Camera.CFrame.Position - aimP).Magnitude
                     local t = math.clamp(d / math.max(Config.Combat.BulletSpeed, 500), 0, 0.5)
                     local vel = root.AssemblyLinearVelocity; if vel.Magnitude > 100 then vel = vel.Unit * 100 end
-                    aimP = aimP + (vel * t) + Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t*t), 0)
+                    aimP = aimP + (vel * (t * Config.Combat.PredictionMult)) + Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t*t), 0)
                 end
                 local pos, on = Camera:WorldToViewportPoint(aimP)
                 if on then
@@ -507,8 +509,8 @@ table.insert(getgenv().SolarConnections, UserInputService.JumpRequest:Connect(fu
     if Config.Misc.HighJump and not Config.State.Unloaded then
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        if root and hum and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+        if root then
+            -- Force the vertical velocity
             root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, Config.Misc.JumpPower, root.AssemblyLinearVelocity.Z)
         end
     end
