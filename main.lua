@@ -76,8 +76,12 @@ getgenv().SolarConfig = {
         Text = Color3.fromRGB(240, 240, 240),
         TextDark = Color3.fromRGB(150, 150, 150),
         Enemy = Color3.fromRGB(255, 60, 60),
+        Distance = Color3.fromRGB(255, 215, 0), -- Golden Xeno Style
+        HealthHigh = Color3.fromRGB(100, 255, 100),
+        HealthMid = Color3.fromRGB(255, 200, 100),
+        HealthLow = Color3.fromRGB(255, 100, 100),
     },
-    State = { Aiming = false, Unloaded = false }
+    State = { Aiming = false, Unloaded = false, Rainbow = true }
 }
 local Config = getgenv().SolarConfig
 
@@ -100,9 +104,23 @@ UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserI
 
 local Sidebar = Instance.new("Frame", MainFrame); Sidebar.Size = UDim2.new(0, 140, 1, 0); Sidebar.BackgroundColor3 = Config.Colors.Section; Sidebar.BorderSizePixel = 0; Round(Sidebar, 10)
 local SideFix = Instance.new("Frame", Sidebar); SideFix.Size = UDim2.new(0, 10, 1, 0); SideFix.Position = UDim2.new(1, -10, 0, 0); SideFix.BackgroundColor3 = Config.Colors.Section; Sidebar.ZIndex = 2
-local Title = Instance.new("TextLabel", Sidebar); Title.Size = UDim2.new(1, 0, 0, 50); Title.Text = "AR2 PRO v5"; Title.Font = Enum.Font.GothamBlack; Title.TextColor3 = Config.Colors.Main; Title.TextSize = 18; Title.BackgroundTransparency = 1
-
 local Content = Instance.new("Frame", MainFrame); Content.Size = UDim2.new(1, -150, 1, -20); Content.Position = UDim2.new(0, 150, 0, 10); Content.BackgroundTransparency = 1
+
+-- Rainbow Footer Logic (Xeno style)
+local Footer = Instance.new("TextLabel", Sidebar)
+Footer.Size = UDim2.new(1, 0, 0, 20); Footer.Position = UDim2.new(0, 0, 1, -25)
+Footer.BackgroundTransparency = 1; Footer.Text = "Made by Antigravity x Xeno"; Footer.Font = Enum.Font.GothamBold
+Footer.TextSize = 11; Footer.TextColor3 = Config.Colors.Main
+
+task.spawn(function()
+    while task.wait() do
+        if Config.State.Unloaded then break end
+        if Config.State.Rainbow then
+            local hue = tick() % 5 / 5
+            Footer.TextColor3 = Color3.fromHSV(hue, 0.8, 1)
+        end
+    end
+end)
 local Tabs = {}; local TabFrames = {}
 
 local function SelectTab(n)
@@ -175,7 +193,7 @@ getgenv().UnloadSolar = function()
     print("[SOLARA] Wersja v5 wyczyszczona.")
 end
 UnloadBtn.MouseButton1Click:Connect(getgenv().UnloadSolar)
-table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i, g) if not g and i.KeyCode == Enum.KeyCode.Insert then ScreenGui.Enabled = not ScreenGui.Enabled end end))
+table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i, g) if not g and i.KeyCode == Enum.KeyCode.RightControl then ScreenGui.Enabled = not ScreenGui.Enabled end end))
 
 -- ==============================================================================
 --[ LOGIKA ESP v5 (ULTRA OPTIMIZED) ]
@@ -185,18 +203,24 @@ local SkeletonConns = {{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"U
 
 local function CreateDrawings(p)
     local d = {
-        Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"),
+        Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"), Corners = {}, CornersOut = {},
         HealthBG = Drawing.new("Square"), Health = Drawing.new("Square"),
-        Tag = Drawing.new("Text"), Weapon = Drawing.new("Text"),
+        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text"),
         Tracer = Drawing.new("Line"),
         Arrow = Drawing.new("Triangle"), ArrowOut = Drawing.new("Triangle"),
         Skeleton = {}
     }
     d.Box.Thickness = 1; d.BoxOut.Thickness = 3; d.BoxOut.Color = Color3.new(0,0,0)
+    for i=1, 8 do 
+        d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1
+        d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0)
+    end
     d.HealthBG.Filled = true; d.HealthBG.Color = Color3.new(0,0,0); d.Health.Filled = true
-    d.Tag.Size = 13; d.Tag.Center = true; d.Tag.Outline = true; d.Tag.Font = 3
-    d.Weapon.Size = 12; d.Weapon.Center = true; d.Weapon.Outline = true; d.Weapon.Font = 3
-    d.Arrow.Filled = true; d.ArrowOut.Thickness = 2; d.ArrowOut.Color = Color3.new(0,0,0)
+    d.Tag.Size = 13; d.Tag.Center = true; d.Tag.Outline = true; d.Tag.Font = 2
+    d.Dist.Size = 12; d.Dist.Center = true; d.Dist.Outline = true; d.Dist.Font = 2; d.Dist.Color = Config.Colors.Distance
+    d.Weapon.Size = 11; d.Weapon.Center = true; d.Weapon.Outline = true; d.Weapon.Font = 2; d.Weapon.Color = Config.Colors.Accent
+    d.Team.Size = 11; d.Team.Center = true; d.Team.Outline = true; d.Team.Font = 2; d.Team.Color = Color3.fromRGB(100, 200, 255)
+    d.Tracer.Thickness = 1; d.Arrow.Filled = true; d.ArrowOut.Thickness = 2; d.ArrowOut.Color = Color3.new(0,0,0)
     for i=1, #SkeletonConns do table.insert(d.Skeleton, Drawing.new("Line")) end
     Cache.Draw[p] = d
 end
@@ -204,8 +228,10 @@ end
 local function HideAll(p)
     local d = Cache.Draw[p]
     if d then
-        d.Box.Visible = false; d.BoxOut.Visible = false; d.Health.Visible = false; d.HealthBG.Visible = false
-        d.Tag.Visible = false; d.Weapon.Visible = false; d.Tracer.Visible = false
+        d.Box.Visible = false; d.BoxOut.Visible = false
+        for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end
+        d.Health.Visible = false; d.HealthBG.Visible = false
+        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false
         d.Arrow.Visible = false; d.ArrowOut.Visible = false
         for _, l in pairs(d.Skeleton) do l.Visible = false end
     end
@@ -217,121 +243,96 @@ local function RemovePlayer(p)
     if Cache.Chams[p] then Cache.Chams[p]:Destroy(); Cache.Chams[p] = nil end
 end
 
-local CrosshairX = Drawing.new("Line"); local CrosshairY = Drawing.new("Line")
-CrosshairX.Thickness = 1.5; CrosshairY.Thickness = 1.5
-
-local frameCount = 0
 local ESP_Loop = RunService.RenderStepped:Connect(function()
     if Config.State.Unloaded then 
         for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end 
-        CrosshairX:Remove(); CrosshairY:Remove()
         return 
     end
 
-    frameCount = frameCount + 1
-    
-    if Config.Visuals.Crosshair then
-        local m = UserInputService:GetMouseLocation()
-        CrosshairX.Visible = true; CrosshairY.Visible = true; CrosshairX.Color = Config.Colors.Main; CrosshairY.Color = Config.Colors.Main
-        CrosshairX.From = m - Vector2.new(7, 0); CrosshairX.To = m + Vector2.new(7, 0)
-        CrosshairY.From = m - Vector2.new(0, 7); CrosshairY.To = m + Vector2.new(0, 7)
-    else CrosshairX.Visible = false; CrosshairY.Visible = false end
-
-    -- Optymalizacja: Przetwarzaj graczy co X klatek jeśli jest ich dużo
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if not Cache.Draw[p] then CreateDrawings(p) end
         
-        local success, err = pcall(function()
-            local char = p.Character
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-                local hum = char.Humanoid
-                if hum.Health <= 0 then HideAll(p) return end
+        local char = p.Character
+        if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
+            local hum = char.Humanoid
+            if hum.Health <= 0 then HideAll(p) continue end
+            
+            local root = char.HumanoidRootPart
+            local dist = (Camera.CFrame.Position - root.Position).Magnitude
+            if dist > Config.Visuals.MaxDistance then HideAll(p) continue end
+            
+            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            if onScreen then
+                local d = Cache.Draw[p]
+                local head = char:FindFirstChild("Head")
+                local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
+                local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
                 
-                local root = char.HumanoidRootPart
-                local dist = (Camera.CFrame.Position - root.Position).Magnitude
-                
-                if dist > Config.Visuals.MaxDistance then HideAll(p) return end
-                
-                local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-                local color = Config.Colors.Enemy
+                if h < 2 then HideAll(p) continue end
 
-                if onScreen then
-                    local d = Cache.Draw[p]
-                    d.Arrow.Visible = false; d.ArrowOut.Visible = false
-                    
-                    local head = char:FindFirstChild("Head")
-                    local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
-                    local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                    
-                    local h = math.abs(hPos.Y - lPos.Y)
-                    local w = h * 0.6
-                    local bPos = Vector2.new(pos.X - w/2, hPos.Y)
-                    
-                    if h < 2 then HideAll(p) return end
+                -- Box / Corners
+                local showC = Config.Visuals.CornerBox; d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
+                if d.Box.Visible then
+                    d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy
+                    d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h)
+                end
 
-                    -- Box
-                    d.Box.Visible = Config.Visuals.BoxESP; d.BoxOut.Visible = Config.Visuals.BoxESP
-                    if Config.Visuals.BoxESP then
-                        d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = color
-                        d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h)
+                for i=1, 8 do d.Corners[i].Visible = Config.Visuals.BoxESP and showC; d.CornersOut[i].Visible = d.Corners[i].Visible end
+                if d.Corners[1].Visible then
+                    local cl = w/4; local c, co = d.Corners, d.CornersOut
+                    c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
+                    c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
+                    c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
+                    c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
+                    for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
+                end
+
+                -- Health
+                d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar
+                if d.Health.Visible then
+                    local pct = hum.Health / hum.MaxHealth
+                    d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
+                    d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct)
+                    d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
+                end
+
+                -- Info
+                local showTags = Config.Visuals.NameTags
+                d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags; d.Weapon.Visible = Config.Visuals.WeaponESP
+                if showTags then
+                    d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
+                    d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
+                    d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
+                end
+                if d.Weapon.Visible then
+                    local tool = char:FindFirstChildOfClass("Tool")
+                    d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None")
+                    d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
+                end
+
+                -- Skeleton
+                for i, line in pairs(d.Skeleton) do
+                    line.Visible = Config.Visuals.Skeleton
+                    if line.Visible then
+                        local conn = SkeletonConns[i]
+                        local p1, p2 = char:FindFirstChild(conn[1]), char:FindFirstChild(conn[2])
+                        if p1 and p2 then
+                            local v1, on1 = Camera:WorldToViewportPoint(p1.Position); local v2, on2 = Camera:WorldToViewportPoint(p2.Position)
+                            if on1 and on2 then line.From = Vector2.new(v1.X, v1.Y); line.To = Vector2.new(v2.X, v2.Y); line.Color = Color3.new(1,1,1) else line.Visible = false end
+                        else line.Visible = false end
                     end
+                end
 
-                    -- Health
-                    d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar
-                    if Config.Visuals.HealthBar then
-                        local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
-                        local bH = math.max(h * pct, 0.1)
-                        d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
-                        d.Health.Position = bPos + Vector2.new(-5, h - bH); d.Health.Size = Vector2.new(2, bH)
-                        d.Health.Color = Color3.fromHSV(pct * 0.3, 1, 1)
-                    end
+                -- Chams
+                if Config.Visuals.Chams then
+                    if not Cache.Chams[p] then local highlight = Instance.new("Highlight", SafeGui); highlight.Adornee = char; Cache.Chams[p] = highlight end
+                    Cache.Chams[p].Enabled = true; Cache.Chams[p].FillColor = Config.Colors.Enemy
+                elseif Cache.Chams[p] then Cache.Chams[p].Enabled = false end
 
-                    -- Nick & Dist
-                    d.Tag.Visible = Config.Visuals.NameTags
-                    if Config.Visuals.NameTags then
-                        d.Tag.Text = string.format("%s [%dm]", p.Name, math.floor(dist))
-                        d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15); d.Tag.Color = Color3.new(1,1,1)
-                    end
-
-                    -- Skeleton (Zoptymalizowany)
-                    local showSkel = Config.Visuals.Skeleton
-                    for i, line in pairs(d.Skeleton) do
-                        line.Visible = showSkel
-                        if showSkel then
-                            local c = SkeletonConns[i]
-                            local p1, p2 = char:FindFirstChild(c[1]), char:FindFirstChild(c[2])
-                            if p1 and p2 then
-                                local v1, on1 = Camera:WorldToViewportPoint(p1.Position)
-                                local v2, on2 = Camera:WorldToViewportPoint(p2.Position)
-                                if on1 and on2 then line.From = Vector2.new(v1.X, v1.Y); line.To = Vector2.new(v2.X, v2.Y); line.Color = Color3.new(1,1,1) else line.Visible = false end
-                            else line.Visible = false end
-                        end
-                    end
-                    
-                    -- Chams
-                    if Config.Visuals.Chams then
-                        if not Cache.Chams[p] then
-                            local h = Instance.new("Highlight", SafeGui)
-                            h.Adornee = char; h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop; Cache.Chams[p] = h
-                        end
-                        Cache.Chams[p].Enabled = true; Cache.Chams[p].FillColor = color; Cache.Chams[p].FillTransparency = 0.5
-                    elseif Cache.Chams[p] then Cache.Chams[p].Enabled = false end
-
-                elseif Config.Visuals.OffScreenArrows then
-                    HideAll(p); local d = Cache.Draw[p]
-                    d.Arrow.Visible = true; d.ArrowOut.Visible = true
-                    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-                    local sPos = Vector3.new(pos.X, pos.Y, pos.Z); if pos.Z < 0 then sPos = Vector3.new(-pos.X, -pos.Y, pos.Z) end
-                    local dir = (Vector2.new(sPos.X, sPos.Y) - center).Unit
-                    local arrowP = center + (dir * 220)
-                    local arrowB = center + (dir * 200)
-                    local perp = Vector2.new(-dir.Y, dir.X)
-                    d.Arrow.PointA = arrowP; d.Arrow.PointB = arrowB + (perp * 10); d.Arrow.PointC = arrowB - (perp * 10); d.Arrow.Color = color
-                    d.ArrowOut.PointA = arrowP; d.ArrowOut.PointB = arrowB + (perp * 10); d.ArrowOut.PointC = arrowB - (perp * 10)
-                else HideAll(p) end
             else HideAll(p) end
-        end)
+        else HideAll(p) end
     end
 end)
 table.insert(getgenv().SolarConnections, ESP_Loop)
