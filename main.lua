@@ -55,6 +55,7 @@ getgenv().SolarConfig = {
         MinDistance = 0,
         ItemESPAUG = false,
         Crosshair = true,
+        TextSize = 13,
         ESP_FPS_Limit = 1
     },
     Combat = {
@@ -82,7 +83,11 @@ getgenv().SolarConfig = {
         HighJump = false,
         JumpPower = 50,
         VehicleFly = false,
-        FlySpeed = 50
+        FlySpeed = 50,
+        Fullbright = false,
+        HitboxSize = 2,
+        ExpandHitbox = false,
+        Streamproof = false
     },
     Colors = {
         Main = Color3.fromRGB(138, 43, 226),
@@ -141,17 +146,26 @@ end)
 local Tabs = {}; local TabFrames = {}
 
 local function SelectTab(n)
-    for name, f in pairs(TabFrames) do f.Visible = (name == n) end
+    for name, f in pairs(TabFrames) do 
+        if name == n then
+            f.Visible = true
+            f.GroupTransparency = 1
+            Tween(f, {GroupTransparency = 0}, 0.3)
+        else
+            f.Visible = false 
+        end
+    end
     for name, b in pairs(Tabs) do if name == n then Tween(b, {BackgroundColor3 = Config.Colors.Main, TextColor3 = Color3.new(1,1,1)}) else Tween(b, {BackgroundColor3 = Config.Colors.Element, TextColor3 = Config.Colors.TextDark}) end end
 end
 
 local function CreateTab(n)
     local B = Instance.new("TextButton", Sidebar); B.Size = UDim2.new(0, 120, 0, 35); B.BackgroundColor3 = Config.Colors.Element; B.Text = n; B.Font = Enum.Font.GothamBold; B.TextColor3 = Config.Colors.TextDark; B.TextSize = 13; B.AutoButtonColor = false; Round(B, 6)
-    local F = Instance.new("ScrollingFrame", Content); F.Size = UDim2.new(1, 0, 1, 0); F.BackgroundTransparency = 1; F.ScrollBarThickness = 2; F.Visible = false
-    local L = Instance.new("UIListLayout", F); L.Padding = UDim.new(0, 8); L.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    L:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() F.CanvasSize = UDim2.new(0, 0, 0, L.AbsoluteContentSize.Y + 10) end)
+    local F = Instance.new("CanvasGroup", Content); F.Size = UDim2.new(1, 0, 1, 0); F.BackgroundTransparency = 1; F.Visible = false
+    local SC = Instance.new("ScrollingFrame", F); SC.Size = UDim2.new(1, 0, 1, 0); SC.BackgroundTransparency = 1; SC.ScrollBarThickness = 2; SC.BorderSizePixel = 0
+    local L = Instance.new("UIListLayout", SC); L.Padding = UDim.new(0, 8); L.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    L:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() SC.CanvasSize = UDim2.new(0, 0, 0, L.AbsoluteContentSize.Y + 10) end)
     Tabs[n] = B; TabFrames[n] = F; B.MouseButton1Click:Connect(function() SelectTab(n) end)
-    return F
+    return SC
 end
 
 local TabListL = Instance.new("UIListLayout", Sidebar); TabListL.Padding = UDim.new(0, 5); TabListL.HorizontalAlignment = Enum.HorizontalAlignment.Center; TabListL.SortOrder = Enum.SortOrder.LayoutOrder; Instance.new("UIPadding", Sidebar).PaddingTop = UDim.new(0, 50)
@@ -212,6 +226,8 @@ CreateToggle(TabVis, "Chams (Highlight)", "Chams", "Visuals")
 CreateToggle(TabVis, "Helicopter ESP", "HeliESP", "Visuals")
 CreateToggle(TabVis, "Heli Tracers", "HeliTracers", "Visuals")
 CreateToggle(TabVis, "AUG Item ESP", "ItemESPAUG", "Visuals")
+CreateToggle(TabVis, "Custom Crosshair", "Crosshair", "Visuals")
+CreateSlider(TabVis, "ESP Text Size", "Visuals", "TextSize", 8, 24, false)
 CreateSlider(TabVis, "Max Distance", "Visuals", "MaxDistance", 100, 10000, false)
 
 CreateToggle(TabCbt, "Aimbot", "AimAssist", "Combat")
@@ -232,6 +248,10 @@ CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
 CreateSlider(TabMisc, "Jump Height", "Misc", "JumpPower", 50, 300, false)
 CreateToggle(TabMisc, "Vehicle Fly", "VehicleFly", "Misc")
 CreateSlider(TabMisc, "Fly Speed", "Misc", "FlySpeed", 10, 300, false)
+CreateToggle(TabMisc, "Fullbright", "Fullbright", "Misc")
+CreateToggle(TabMisc, "Expand Hitbox", "ExpandHitbox", "Misc")
+CreateSlider(TabMisc, "Hitbox Size", "Misc", "HitboxSize", 2, 15, false)
+CreateToggle(TabMisc, "Streamproof (Hide UI)", "Streamproof", "Misc")
 
 local HttpService = game:GetService("HttpService")
 local CfgName = "AR2_SolarV5_Config.json"
@@ -305,8 +325,10 @@ local function CreateDrawings(p)
         Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"), Corners = {}, CornersOut = {},
         HealthBG = Drawing.new("Square"), Health = Drawing.new("Square"),
         Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text"),
-        Tracer = Drawing.new("Line")
+        Tracer = Drawing.new("Line"), Skeleton = {}, Arrows = Drawing.new("Triangle")
     }
+    for i=1, #SkeletonConns do d.Skeleton[i] = Drawing.new("Line"); d.Skeleton[i].Thickness = 1 end
+    d.Arrows.Thickness = 1; d.Arrows.Filled = true; d.Arrows.Color = Config.Colors.Main
     d.Box.Thickness = 1; d.BoxOut.Thickness = 3; d.BoxOut.Color = Color3.new(0,0,0)
     for i=1, 8 do d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1; d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0) end
     d.HealthBG.Filled = true; d.HealthBG.Color = Color3.new(0,0,0); d.Health.Filled = true
@@ -324,7 +346,8 @@ local function HideAll(p)
         d.Box.Visible = false; d.BoxOut.Visible = false
         for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end
         d.Health.Visible = false; d.HealthBG.Visible = false
-        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false 
+        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false; d.Arrows.Visible = false
+        for _, l in pairs(d.Skeleton) do l.Visible = false end
     end
     if Cache.Chams[p] and Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = false end
 end
@@ -412,6 +435,8 @@ local COL_BLACK   = Color3.new(0, 0, 0)
 local V3_UP25     = Vector3.new(0, 2.5, 0)
 local V3_DOWN3    = Vector3.new(0, -3, 0)
 local V2_ZERO     = Vector2.new(0, 0)
+local CrossLines  = {Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line")}
+for _,l in pairs(CrossLines) do l.Thickness = 1.5; l.Color = Color3.new(0,1,0); l.ZIndex = 10 end
 
 -- Cache nazw graczy (string concat tworzy śmieć co klatkę)
 local NameCache = {}
@@ -439,6 +464,8 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
     local showTags  = Config.Visuals.NameTags
     local showWep   = Config.Visuals.WeaponESP
     local showTrace = Config.Visuals.Tracers
+    local showSkel  = Config.Visuals.Skeleton
+    local showArrow = Config.Visuals.OffScreenArrows
     local showChams = Config.Visuals.Chams
     local enemyCol  = Config.Colors.Enemy
     local hpHigh    = Config.Colors.HealthHigh
@@ -446,6 +473,7 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
     local hpLow     = Config.Colors.HealthLow
     local distCol   = Config.Colors.Distance
     local accentCol = Config.Colors.Accent
+    local textSize  = Config.Visuals.TextSize
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -530,13 +558,16 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                 end
                 if showTags then
                     d.Tag.Text = NameCache[p] or p.Name
+                    d.Tag.Size = textSize
                     d.Tag.Position = Vector2.new(pos.X, by - 15)
                     d.Dist.Text = math.floor(dist) .. "m"
+                    d.Dist.Size = textSize - 1
                     d.Dist.Position = Vector2.new(pos.X, by + h + 2)
                     if slowTick then
                         TeamCache[p] = p.Team and ("\xf0\x9f\x91\xa5 " .. p.Team.Name) or "\xf0\x9f\x91\xa5 No Team"
                     end
                     d.Team.Text = TeamCache[p] or "..."
+                    d.Team.Size = textSize - 2
                     d.Team.Position = Vector2.new(pos.X, by + h + 14)
                 end
                 
@@ -548,6 +579,7 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                         ToolCache[p] = "\xf0\x9f\x94\xab " .. (tool and tool.Name or "None")
                     end
                     d.Weapon.Text = ToolCache[p] or "..."
+                    d.Weapon.Size = textSize - 2
                     d.Weapon.Position = Vector2.new(pos.X, by + h + (showTags and 26 or 2))
                 end
 
@@ -577,8 +609,83 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                     Cache.Chams[p].Enabled = false 
                 end
 
-            else HideAll(p) end
+                -- SKELETON ESP
+                if d.Skeleton[1].Visible ~= showSkel then for _,l in pairs(d.Skeleton) do l.Visible = showSkel end end
+                if showSkel then
+                    for i, bone in pairs(SkeletonConns) do
+                        local b1, b2 = char:FindFirstChild(bone[1]), char:FindFirstChild(bone[2])
+                        if b1 and b2 then
+                            local p1, o1 = Camera:WorldToViewportPoint(b1.Position)
+                            local p2, o2 = Camera:WorldToViewportPoint(b2.Position)
+                            if o1 and o2 then
+                                d.Skeleton[i].From = Vector2.new(p1.X, p1.Y)
+                                d.Skeleton[i].To   = Vector2.new(p2.X, p2.Y)
+                                d.Skeleton[i].Color = enemyCol
+                            else d.Skeleton[i].Visible = false end
+                        else d.Skeleton[i].Visible = false end
+                    end
+                end
+
+                -- OFF-SCREEN ARROWS
+                d.Arrows.Visible = false -- Resetuj na ekranie
+            else 
+                HideAll(p)
+                -- Pokaż strzałkę jeśli gracz jest poza ekranem, ale w zasięgu
+                if showArrow and dist < maxDist then
+                    local d = Cache.Draw[p]
+                    local relativePos = Camera.CFrame:PointToObjectSpace(rootPos)
+                    local angle = math.atan2(-relativePos.X, relativePos.Z)
+                    local arrowSize = 15
+                    local arrowRadius = 200
+                    
+                    local center = Vector2.new(halfVpX, vpY * 0.5)
+                    local dir = Vector2.new(math.sin(angle), math.cos(angle))
+                    local pos = center + dir * arrowRadius
+                    
+                    d.Arrows.PointA = pos + dir * arrowSize
+                    d.Arrows.PointB = pos + Vector2.new(dir.Y, -dir.X) * (arrowSize * 0.6)
+                    d.Arrows.PointC = pos + Vector2.new(-dir.Y, dir.X) * (arrowSize * 0.6)
+                    d.Arrows.Visible = true
+                end
+            end
         else HideAll(p) end
+    end
+    
+    -- FULLBRIGHT Logic
+    if Config.Misc.Fullbright then
+        game:GetService("Lighting").Brightness = 2
+        game:GetService("Lighting").ClockTime = 14
+        game:GetService("Lighting").GlobalShadows = false
+        game:GetService("Lighting").OutdoorAmbient = Color3.new(1,1,1)
+    end
+    
+    -- CROSSHAIR Logic
+    local chVis = Config.Visuals.Crosshair
+    for _, l in pairs(CrossLines) do l.Visible = chVis end
+    if chVis then
+        local m = UserInputService:GetMouseLocation()
+        local s = 6
+        local g = 3
+        CrossLines[1].From = m + Vector2.new(0, g); CrossLines[1].To = m + Vector2.new(0, s + g)
+        CrossLines[2].From = m - Vector2.new(0, g); CrossLines[2].To = m - Vector2.new(0, s + g)
+        CrossLines[3].From = m + Vector2.new(g, 0); CrossLines[3].To = m + Vector2.new(s + g, 0)
+        CrossLines[4].From = m - Vector2.new(g, 0); CrossLines[4].To = m - Vector2.new(s + g, 0)
+    end
+    -- STREAMPROOF Logic
+    ScreenGui.DisplayOrder = Config.Misc.Streamproof and -100 or 10
+    
+    -- HITBOX EXPANDER Logic
+    if slowTick and Config.Misc.ExpandHitbox then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local head = p.Character:FindFirstChild("Head")
+                if head then
+                    head.Size = Vector3.new(Config.Misc.HitboxSize, Config.Misc.HitboxSize, Config.Misc.HitboxSize)
+                    head.Transparency = 0.5
+                    head.CanCollide = false
+                end
+            end
+        end
     end
 end)
 table.insert(getgenv().SolarConnections, ESP_Loop)
