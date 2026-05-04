@@ -388,8 +388,31 @@ local function UpdateAim()
     end
 end
 
+local function IsVisible(targetPart)
+    if not targetPart then return false end
+    local rayOrigin = Camera.CFrame.Position
+    local rayDirection = (targetPart.Position - rayOrigin)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    rayParams.IgnoreWater = true
+    
+    local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    
+    if raycastResult then
+        if raycastResult.Instance:IsDescendantOf(targetPart.Parent) then
+            return true
+        end
+        return false
+    end
+    return true
+end
+
 local function GetClosest()
-    local target = nil; local dist = Config.Combat.FOV; local m = UserInputService:GetMouseLocation()
+    local target = nil; local dist = Config.Combat.FOV
+    local bestVisTarget = nil; local bestVisDist = Config.Combat.FOV
+    local m = UserInputService:GetMouseLocation()
+    
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local char = p.Character
@@ -401,13 +424,27 @@ local function GetClosest()
                     local pos, on = Camera:WorldToViewportPoint(part.Position)
                     if on then
                         local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
-                        if mag < dist then target = p; dist = mag end
+                        if mag < Config.Combat.FOV then
+                            local visible = IsVisible(part)
+                            if visible and mag < bestVisDist then
+                                bestVisTarget = p
+                                bestVisDist = mag
+                            end
+                            if mag < dist then
+                                target = p
+                                dist = mag
+                            end
+                        end
                     end
                 end
             end
         end
     end
-    return target
+    
+    if Config.Combat.WallCheck then
+        return bestVisTarget
+    end
+    return bestVisTarget or target
 end
 
 table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i) if not listening and (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = true end end))
