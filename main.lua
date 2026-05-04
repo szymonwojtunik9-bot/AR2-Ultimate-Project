@@ -693,18 +693,27 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                 local torso = char:FindFirstChild("UpperTorso")
                 local m = UserInputService:GetMouseLocation()
                 local bestM = math.huge
+                
+                -- Priorytetyzujemy głowę. Jeśli obie części są widoczne, głowa wygrywa.
                 for _, p in ipairs({head, torso}) do
                     if p then
                         local vis = IsVisible(p)
                         local scr, on = Camera:WorldToViewportPoint(p.Position)
                         if on then
                             local mag = (Vector2.new(scr.X, scr.Y) - m).Magnitude
-                            if vis and mag < bestM then bestM = mag; part = p end
+                            -- Jeśli to głowa i jest widoczna, sztucznie zmniejszamy mag żeby ZAWSZE wygrała z torsem
+                            if p.Name == "Head" then
+                                mag = mag / 50 
+                            end
+                            
+                            if vis and mag < bestM then 
+                                bestM = mag; part = p 
+                            end
                         end
                     end
                 end
-                -- Fallback: głowa nawet jeśli za ścianą
-                if not part then part = char:FindFirstChild("Head") or char.PrimaryPart end
+                -- Fallback: jeśli żadna część nie jest ewidentnie lepsza/widoczna, wymuś Głowę
+                if not part then part = head or char.PrimaryPart end
             else
                 part = char:FindFirstChild(Config.Combat.AimPart)
             end
