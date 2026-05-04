@@ -673,66 +673,81 @@ local AimLoop = RunService.RenderStepped:Connect(function()
     local fovRing = getgenv().FOVRing
     if fovRing then
         fovRing.Visible = Config.Combat.ShowFOV
-        fovRing.Radius = Config.Combat.FOV
+        fovRing.Radius  = Config.Combat.FOV
         fovRing.Position = UserInputService:GetMouseLocation()
-        fovRing.Color = Config.Colors.Main
+        fovRing.Color   = Config.Colors.Main
     end
     
     if Config.State.Aiming and Config.Combat.AimAssist then
         UpdateAim()
-        if not CurrentT or not CurrentT.Character or CurrentT.Character.Humanoid.Health <= 0 then CurrentT = GetClosest() end
-        if CurrentT and CurrentT.Character then
+        -- Zawsze szukamy najlepszego celu co klatkę (pozwala na dynamiczne przełączanie między graczami)
+        CurrentT = GetClosest()
+        
+        local char = CurrentT and CurrentT.Character
+        local hum  = char and char:FindFirstChild("Humanoid")
+        if char and hum and hum.Health > 0 then
+            -- Wybierz part do celowania
             local part = nil
             if Config.Combat.DynamicAim then
-                local parts = {CurrentT.Character:FindFirstChild("Head"), CurrentT.Character:FindFirstChild("UpperTorso")}
-                local bestM = math.huge
+                local head  = char:FindFirstChild("Head")
+                local torso = char:FindFirstChild("UpperTorso")
                 local m = UserInputService:GetMouseLocation()
-                for _, p in ipairs(parts) do
-                    if p and IsVisible(p) then
-                        local pos = Camera:WorldToViewportPoint(p.Position)
-                        local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
-                        if mag < bestM then bestM = mag; part = p end
+                local bestM = math.huge
+                for _, p in ipairs({head, torso}) do
+                    if p then
+                        local vis = IsVisible(p)
+                        local scr, on = Camera:WorldToViewportPoint(p.Position)
+                        if on then
+                            local mag = (Vector2.new(scr.X, scr.Y) - m).Magnitude
+                            if vis and mag < bestM then bestM = mag; part = p end
+                        end
                     end
                 end
-                if not part then part = CurrentT.Character:FindFirstChild("Head") or CurrentT.Character.PrimaryPart end
+                -- Fallback: głowa nawet jeśli za ścianą
+                if not part then part = char:FindFirstChild("Head") or char.PrimaryPart end
             else
-                part = CurrentT.Character:FindFirstChild(Config.Combat.AimPart)
+                part = char:FindFirstChild(Config.Combat.AimPart)
             end
             
-            local root = CurrentT.Character:FindFirstChild("HumanoidRootPart")
+            local root = char:FindFirstChild("HumanoidRootPart")
             if part and root then
                 local aimP = part.Position
+                
                 if Config.Combat.AdvancedPrediction then
-                    local d = (Camera.CFrame.Position - aimP).Magnitude
-                    -- Iteracyjne przewidywanie - 2 iteracje dla większej precyzji na dużych dystansach
-                    local t = d / math.max(Config.Combat.BulletSpeed, 500)
+                    local camPos = Camera.CFrame.Position
+                    local d  = (camPos - aimP).Magnitude
+                    local t  = d / math.max(Config.Combat.BulletSpeed, 500)
                     local vel = root.AssemblyLinearVelocity
-                    -- Nie ucinaj prędkości - ogranicz tylko ekstremalne wartości (exploit)
                     if vel.Magnitude > 250 then vel = vel.Unit * 250 end
+                    -- Iteracja 1: szybkie przybliżenie pozycji
                     local pred1 = aimP + vel * t
-                    -- Druga iteracja (poprawia precyzję przy ruchu na dużych dystansach)
-                    local d2 = (Camera.CFrame.Position - pred1).Magnitude
+                    -- Iteracja 2: korygujemy czas dolotu do przewidzianej pozycji
+                    local d2 = (camPos - pred1).Magnitude
                     local t2 = d2 / math.max(Config.Combat.BulletSpeed, 500)
-                    local leadOffset = vel * (t2 * Config.Combat.PredictionMult)
-                    local dropOffset = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t2*t2), 0)
-                    aimP = aimP + leadOffset + dropOffset
+                    local lead = vel * (t2 * Config.Combat.PredictionMult)
+                    local drop = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t2 * t2), 0)
+                    aimP = aimP + lead + drop
                 end
-                local pos, on = Camera:WorldToViewportPoint(aimP)
+                
+                local scr, on = Camera:WorldToViewportPoint(aimP)
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                
                 if on or physDist <= 50 then
-                    local m = UserInputService:GetMouseLocation()
-                    local dx = pos.X - m.X
-                    local dy = pos.Y - m.Y
-                    -- Step-based smoothing: proporcjonalny do odległości od celu na ekranie
-                    local screenDist = math.sqrt(dx*dx + dy*dy)
-                    local step = math.min(screenDist, 50) * Config.Combat.Smoothness
-                    local mx = (screenDist > 0) and (dx / screenDist * step) or 0
-                    local my = (screenDist > 0) and (dy / screenDist * step) or 0
+                    local m  = UserInputService:GetMouseLocation()
+                    local dx = scr.X - m.X
+                    local dy = scr.Y - m.Y
+                    -- Prosty, niezawodny ruch: clamp na 150px żeby nie przeskakiwał przez cel
+                    local mx = math.clamp(dx * Config.Combat.Smoothness, -150, 150)
+                    local my = math.clamp(dy * Config.Combat.Smoothness, -150, 150)
                     if mousemoverel then mousemoverel(mx, my) end
-                else CurrentT = nil end
+                else
+                    CurrentT = nil
+                end
             end
         end
-    else CurrentT = nil end
+    else
+        CurrentT = nil
+    end
 end)
 table.insert(getgenv().SolarConnections, AimLoop)
 
