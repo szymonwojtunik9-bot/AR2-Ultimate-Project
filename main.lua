@@ -257,8 +257,17 @@ local function HideAll(p)
 end
 
 local function RemovePlayer(p)
-    if Cache.Draw[p] then for _, v in pairs(Cache.Draw[p]) do if type(v) == "table" then for _, l in pairs(v) do l:Remove() end else v:Remove() end end Cache.Draw[p] = nil end
-    if Cache.Chams[p] then Cache.Chams[p]:Destroy(); Cache.Chams[p] = nil end
+    if Cache.Draw[p] then 
+        for _, v in pairs(Cache.Draw[p]) do 
+            if type(v) == "table" then 
+                for _, l in pairs(v) do pcall(function() l:Remove() end) end 
+            else 
+                pcall(function() v:Remove() end) 
+            end 
+        end 
+        Cache.Draw[p] = nil 
+    end
+    if Cache.Chams[p] then pcall(function() Cache.Chams[p]:Destroy() end); Cache.Chams[p] = nil end
 end
 
 getgenv().ClearESP = function()
@@ -285,7 +294,7 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
             if onScreen then
                 local d = Cache.Draw[p]
-                local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
+                local hPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
                 local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
                 local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
                 
