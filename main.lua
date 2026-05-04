@@ -615,42 +615,31 @@ local function GetClosest()
             local hum = char and char:FindFirstChild("Humanoid")
             if root and hum and hum.Health > 0 then
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
-                local forceTarget = (physDist <= 50)
                 
-                local partList = Config.Combat.DynamicAim and {char:FindFirstChild("Head"), char:FindFirstChild("UpperTorso")} or {char:FindFirstChild(Config.Combat.AimPart)}
-                local foundPart = false
-                local bestPartMag = math.huge
-                local anyVisible = false
+                local head = char:FindFirstChild("Head")
+                local torso = char:FindFirstChild("UpperTorso")
+                local part = nil
+                local vis = false
                 
-                for _, part in ipairs(partList) do
-                    if part then
-                        local pos, on = Camera:WorldToViewportPoint(part.Position)
-                        local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or (forceTarget and 0 or math.huge)
-                        local vis = IsVisible(part)
-                        
-                        if on or forceTarget then
-                            if vis then
-                                anyVisible = true
-                                if mag < bestPartMag or forceTarget then 
-                                    bestPartMag = forceTarget and (physDist - 1000) or mag
-                                    foundPart = true 
-                                end
-                            elseif not anyVisible and (mag < bestPartMag or forceTarget) then
-                                bestPartMag = forceTarget and (physDist - 1000) or mag
-                                foundPart = true
-                            end
-                        end
-                    end
+                -- STRICT HEAD PRIORITY
+                if Config.Combat.DynamicAim then
+                    if head and IsVisible(head) then part = head; vis = true
+                    elseif torso and IsVisible(torso) then part = torso; vis = true
+                    else part = head or char.PrimaryPart end
+                else
+                    part = char:FindFirstChild(Config.Combat.AimPart)
+                    vis = part and IsVisible(part)
                 end
                 
-                if foundPart then
-                    if anyVisible then
-                        if bestPartMag < bestVisDist then
-                            bestVisTarget = p; bestVisDist = bestPartMag
-                        end
+                if part then
+                    local pos, on = Camera:WorldToViewportPoint(part.Position)
+                    local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or math.huge
+                    
+                    if physDist <= 50 then
+                        if physDist < bestPhysDist then target = p; bestPhysDist = physDist end
                     else
-                        if physDist < bestPhysDist then
-                            target = p; bestPhysDist = physDist
+                        if on and vis and mag < bestVisDist then
+                            bestVisTarget = p; bestVisDist = mag
                         end
                     end
                 end
@@ -658,9 +647,8 @@ local function GetClosest()
         end
     end
     
-    if Config.Combat.WallCheck then
-        return bestVisTarget
-    end
+    if target then return target end -- Panic mode ma absolutny priorytet
+    if Config.Combat.WallCheck then return bestVisTarget end
     return bestVisTarget or target
 end
 
@@ -686,34 +674,15 @@ local AimLoop = RunService.RenderStepped:Connect(function()
         local char = CurrentT and CurrentT.Character
         local hum  = char and char:FindFirstChild("Humanoid")
         if char and hum and hum.Health > 0 then
-            -- Wybierz part do celowania
+            -- Wybierz part do celowania (Zawsze Head jeśli widoczna)
             local part = nil
+            local head = char:FindFirstChild("Head")
+            local torso = char:FindFirstChild("UpperTorso")
+            
             if Config.Combat.DynamicAim then
-                local head  = char:FindFirstChild("Head")
-                local torso = char:FindFirstChild("UpperTorso")
-                local m = UserInputService:GetMouseLocation()
-                local bestM = math.huge
-                
-                -- Priorytetyzujemy głowę. Jeśli obie części są widoczne, głowa wygrywa.
-                for _, p in ipairs({head, torso}) do
-                    if p then
-                        local vis = IsVisible(p)
-                        local scr, on = Camera:WorldToViewportPoint(p.Position)
-                        if on then
-                            local mag = (Vector2.new(scr.X, scr.Y) - m).Magnitude
-                            -- Jeśli to głowa i jest widoczna, sztucznie zmniejszamy mag żeby ZAWSZE wygrała z torsem
-                            if p.Name == "Head" then
-                                mag = mag / 50 
-                            end
-                            
-                            if vis and mag < bestM then 
-                                bestM = mag; part = p 
-                            end
-                        end
-                    end
-                end
-                -- Fallback: jeśli żadna część nie jest ewidentnie lepsza/widoczna, wymuś Głowę
-                if not part then part = head or char.PrimaryPart end
+                if head and IsVisible(head) then part = head
+                elseif torso and IsVisible(torso) then part = torso
+                else part = head or char.PrimaryPart end
             else
                 part = char:FindFirstChild(Config.Combat.AimPart)
             end
@@ -741,7 +710,7 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                 local scr, on = Camera:WorldToViewportPoint(aimP)
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
                 
-                if on or physDist <= 50 then
+                if on then
                     local m  = UserInputService:GetMouseLocation()
                     local dx = scr.X - m.X
                     local dy = scr.Y - m.Y
@@ -749,6 +718,9 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     local mx = math.clamp(dx * Config.Combat.Smoothness, -150, 150)
                     local my = math.clamp(dy * Config.Combat.Smoothness, -150, 150)
                     if mousemoverel then mousemoverel(mx, my) end
+                elseif physDist <= 50 then
+                    -- CEL ZA PLECAMI (Panic Mode): Używamy CFrame żeby uniknąć wywalania myszy o 180 stopni (bug mousemoverel)
+                    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, aimP)
                 else
                     CurrentT = nil
                 end
