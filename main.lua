@@ -205,36 +205,21 @@ local function CreateDrawings(p)
     local d = {
         Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"), Corners = {}, CornersOut = {},
         HealthBG = Drawing.new("Square"), Health = Drawing.new("Square"),
-        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text"),
-        Tracer = Drawing.new("Line"),
-        Arrow = Drawing.new("Triangle"), ArrowOut = Drawing.new("Triangle"),
-        Skeleton = {}
+        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text")
     }
     d.Box.Thickness = 1; d.BoxOut.Thickness = 3; d.BoxOut.Color = Color3.new(0,0,0)
-    for i=1, 8 do 
-        d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1
-        d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0)
-    end
+    for i=1, 8 do d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1; d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0) end
     d.HealthBG.Filled = true; d.HealthBG.Color = Color3.new(0,0,0); d.Health.Filled = true
     d.Tag.Size = 13; d.Tag.Center = true; d.Tag.Outline = true; d.Tag.Font = 2
     d.Dist.Size = 12; d.Dist.Center = true; d.Dist.Outline = true; d.Dist.Font = 2; d.Dist.Color = Config.Colors.Distance
     d.Weapon.Size = 11; d.Weapon.Center = true; d.Weapon.Outline = true; d.Weapon.Font = 2; d.Weapon.Color = Config.Colors.Accent
     d.Team.Size = 11; d.Team.Center = true; d.Team.Outline = true; d.Team.Font = 2; d.Team.Color = Color3.fromRGB(100, 200, 255)
-    d.Tracer.Thickness = 1; d.Arrow.Filled = true; d.ArrowOut.Thickness = 2; d.ArrowOut.Color = Color3.new(0,0,0)
-    for i=1, #SkeletonConns do table.insert(d.Skeleton, Drawing.new("Line")) end
     Cache.Draw[p] = d
 end
 
 local function HideAll(p)
     local d = Cache.Draw[p]
-    if d then
-        d.Box.Visible = false; d.BoxOut.Visible = false
-        for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end
-        d.Health.Visible = false; d.HealthBG.Visible = false
-        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false
-        d.Arrow.Visible = false; d.ArrowOut.Visible = false
-        for _, l in pairs(d.Skeleton) do l.Visible = false end
-    end
+    if d then d.Box.Visible = false; d.BoxOut.Visible = false; for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end; d.Health.Visible = false; d.HealthBG.Visible = false; d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false end
     if Cache.Chams[p] then Cache.Chams[p].Enabled = false end
 end
 
@@ -252,35 +237,22 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         if not Cache.Draw[p] then CreateDrawings(p) end
-        
         local char = p.Character
         if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") then
-            local hum = char.Humanoid
-            if hum.Health <= 0 then HideAll(p) continue end
-            
-            local root = char.HumanoidRootPart
-            local dist = (Camera.CFrame.Position - root.Position).Magnitude
+            local hum = char.Humanoid; if hum.Health <= 0 then HideAll(p) continue end
+            local root = char.HumanoidRootPart; local dist = (Camera.CFrame.Position - root.Position).Magnitude
             if dist > Config.Visuals.MaxDistance then HideAll(p) continue end
-            
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
             if onScreen then
                 local d = Cache.Draw[p]
-                local head = char:FindFirstChild("Head")
-                local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
+                local head = char:FindFirstChild("Head"); local hPos = Camera:WorldToViewportPoint(head and head.Position + Vector3.new(0, 0.8, 0) or root.Position + Vector3.new(0, 2.3, 0))
                 local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
                 local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
                 
-                if h < 2 then HideAll(p) continue end
-
-                -- Box / Corners
-                local showC = Config.Visuals.CornerBox; d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
-                if d.Box.Visible then
-                    d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy
-                    d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h)
-                end
-
-                for i=1, 8 do d.Corners[i].Visible = Config.Visuals.BoxESP and showC; d.CornersOut[i].Visible = d.Corners[i].Visible end
-                if d.Corners[1].Visible then
+                local showC = Config.Visuals.CornerBox; d.Box.Visible = not showC; d.BoxOut.Visible = not showC
+                if not showC then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
+                for i=1, 8 do d.Corners[i].Visible = showC; d.CornersOut[i].Visible = showC end
+                if showC then
                     local cl = w/4; local c, co = d.Corners, d.CornersOut
                     c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
                     c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
@@ -289,48 +261,14 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                     for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
                 end
 
-                -- Health
-                d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar
-                if d.Health.Visible then
-                    local pct = hum.Health / hum.MaxHealth
-                    d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
-                    d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct)
-                    d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
-                end
-
-                -- Info
-                local showTags = Config.Visuals.NameTags
-                d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags; d.Weapon.Visible = Config.Visuals.WeaponESP
-                if showTags then
-                    d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
-                    d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
-                    d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
-                end
-                if d.Weapon.Visible then
-                    local tool = char:FindFirstChildOfClass("Tool")
-                    d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None")
-                    d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
-                end
-
-                -- Skeleton
-                for i, line in pairs(d.Skeleton) do
-                    line.Visible = Config.Visuals.Skeleton
-                    if line.Visible then
-                        local conn = SkeletonConns[i]
-                        local p1, p2 = char:FindFirstChild(conn[1]), char:FindFirstChild(conn[2])
-                        if p1 and p2 then
-                            local v1, on1 = Camera:WorldToViewportPoint(p1.Position); local v2, on2 = Camera:WorldToViewportPoint(p2.Position)
-                            if on1 and on2 then line.From = Vector2.new(v1.X, v1.Y); line.To = Vector2.new(v2.X, v2.Y); line.Color = Color3.new(1,1,1) else line.Visible = false end
-                        else line.Visible = false end
-                    end
-                end
-
-                -- Chams
-                if Config.Visuals.Chams then
-                    if not Cache.Chams[p] then local highlight = Instance.new("Highlight", SafeGui); highlight.Adornee = char; Cache.Chams[p] = highlight end
-                    Cache.Chams[p].Enabled = true; Cache.Chams[p].FillColor = Config.Colors.Enemy
-                elseif Cache.Chams[p] then Cache.Chams[p].Enabled = false end
-
+                d.Health.Visible = true; d.HealthBG.Visible = true
+                local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
+                d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
+                
+                d.Tag.Visible = true; d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
+                d.Dist.Visible = true; d.Dist.Text = string.format("[%.1fm]", dist); d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
+                d.Team.Visible = true; d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
+                d.Weapon.Visible = true; local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + 26)
             else HideAll(p) end
         else HideAll(p) end
     end
