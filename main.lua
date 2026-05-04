@@ -559,8 +559,8 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
             ToolCache[p]  = "None"
         end
         local char = p.Character
-        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
-        local hum  = char and char:FindFirstChild("Humanoid")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Head"))
         
         if root and hum and hum.Health > 0 then
             local rootPos = root.Position
@@ -912,8 +912,9 @@ local function GetClosest()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local char = p.Character
-            local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
-            local hum = char and char:FindFirstChild("Humanoid")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Head"))
+            
             if root and hum and hum.Health > 0 then
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
                 
