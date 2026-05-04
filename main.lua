@@ -76,8 +76,10 @@ getgenv().SolarConfig = {
         LegitRCS = false,
         SilentAim = false,
         RCSStrength = 5,
-        BulletSpeed = 2500,
-        BulletGravity = 196.2
+        BulletSpeed = 3000,
+        BulletGravity = 45,
+        GravityScale = 1,
+        VerticalOffset = 0
     },
     Misc = {
         HighJump = false,
@@ -253,6 +255,8 @@ CreateToggle(TabCbt, "Silent Aim (Magic Bullets)", "SilentAim", "Combat")
 CreateSlider(TabCbt, "RCS Strength", "Combat", "RCSStrength", 1, 20, false)
 CreateSlider(TabCbt, "Smoothness", "Combat", "Smoothness", 0.1, 1, true)
 CreateSlider(TabCbt, "Lead Calibration", "Combat", "PredictionMult", 0.1, 5, true)
+CreateSlider(TabCbt, "Gravity Scale", "Combat", "GravityScale", 0, 2, true)
+CreateSlider(TabCbt, "Vertical Offset", "Combat", "VerticalOffset", -5, 5, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
 
 CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
@@ -768,53 +772,39 @@ Players.PlayerRemoving:Connect(RemovePlayer)
 -- Wartości skalibrowane pod AR2 (1 stud ≈ 0.28m, silnik Roblox)
 local WeaponData = {
     -- ===== SNAJPERKI =====
-    ["L96A1"]       = {Speed = 4000, Gravity = 150},
-    ["M24"]         = {Speed = 3800, Gravity = 160},
-    ["AWP"]         = {Speed = 4200, Gravity = 140},
-    ["Kar98k"]      = {Speed = 3600, Gravity = 170},
-    ["SVD"]         = {Speed = 3500, Gravity = 175},
-    ["Dragunov"]    = {Speed = 3500, Gravity = 175},
-    ["Mosin"]       = {Speed = 3700, Gravity = 165},
+    ["L96A1"]       = {Speed = 4200, Gravity = 35},
+    ["M24"]         = {Speed = 4000, Gravity = 38},
+    ["AWP"]         = {Speed = 4500, Gravity = 30},
+    ["Kar98k"]      = {Speed = 3800, Gravity = 42},
+    ["SVD"]         = {Speed = 3600, Gravity = 45},
+    ["Dragunov"]    = {Speed = 3600, Gravity = 45},
+    ["Mosin"]       = {Speed = 3800, Gravity = 40},
     -- ===== DMR =====
-    ["SKS"]         = {Speed = 3200, Gravity = 180},
-    ["M14"]         = {Speed = 3000, Gravity = 185},
-    ["Mk14"]        = {Speed = 3100, Gravity = 180},
+    ["SKS"]         = {Speed = 3400, Gravity = 48},
+    ["M14"]         = {Speed = 3200, Gravity = 50},
+    ["Mk14"]        = {Speed = 3300, Gravity = 48},
     -- ===== KARABINY SZTURMOWE =====
-    -- AK-47 (7.62x39mm - wolniejsza, cięższa kula, większy opad)
-    ["AK-47"]       = {Speed = 2620, Gravity = 210},
-    ["AK47"]        = {Speed = 2620, Gravity = 210},
-    -- AK-74 (5.45x39mm - szybsza, lżejsza kula, mniejszy opad)
-    -- Priorytet: DOKŁADNE wartości pod AR2
-    ["AK-74"]       = {Speed = 2950, Gravity = 190},
-    ["AK74"]        = {Speed = 2950, Gravity = 190},
-    -- AKS-74 (składana kolba, identyczna balistyka co AK-74)
-    ["AKS-74"]      = {Speed = 2950, Gravity = 190},
-    ["AKS74"]       = {Speed = 2950, Gravity = 190},
-    ["AKS 74"]      = {Speed = 2950, Gravity = 190},
-    -- AKS-74U (skrócona lufa = niższa prędkość)
-    ["AKS-74U"]     = {Speed = 2600, Gravity = 196},
-    ["AKS74U"]      = {Speed = 2600, Gravity = 196},
-    -- AUG (Steyr AUG, 5.56x45mm NATO - wysoka prędkość, mały opad)
-    ["AUG"]         = {Speed = 3100, Gravity = 185},
-    ["Steyr AUG"]   = {Speed = 3100, Gravity = 185},
-    ["AUG A1"]      = {Speed = 3100, Gravity = 185},
-    ["AUG A3"]      = {Speed = 3100, Gravity = 185},
-    -- M4/M16 (5.56x45mm NATO)
-    ["M4A1"]        = {Speed = 2950, Gravity = 188},
-    ["M4"]          = {Speed = 2950, Gravity = 188},
-    ["HK416"]       = {Speed = 3050, Gravity = 185},
-    ["SCAR-L"]      = {Speed = 2900, Gravity = 190},
-    ["M16A4"]       = {Speed = 3000, Gravity = 186},
-    ["FN FAL"]      = {Speed = 2750, Gravity = 200},
+    ["AK-47"]       = {Speed = 2800, Gravity = 55},
+    ["AK47"]        = {Speed = 2800, Gravity = 55},
+    ["AK-74"]       = {Speed = 3100, Gravity = 45},
+    ["AK74"]        = {Speed = 3100, Gravity = 45},
+    ["AKS-74"]      = {Speed = 3100, Gravity = 45},
+    ["AKS74"]       = {Speed = 3100, Gravity = 45},
+    ["AKS-74U"]     = {Speed = 2800, Gravity = 50},
+    ["AUG"]         = {Speed = 3300, Gravity = 40},
+    ["M4A1"]        = {Speed = 3200, Gravity = 42},
+    ["M4"]          = {Speed = 3200, Gravity = 42},
+    ["HK416"]       = {Speed = 3300, Gravity = 40},
+    ["SCAR-L"]      = {Speed = 3100, Gravity = 45},
     -- ===== SMG =====
-    ["MP5"]         = {Speed = 2400, Gravity = 210},
-    ["UMP45"]       = {Speed = 2100, Gravity = 220},
-    ["Vector"]      = {Speed = 2000, Gravity = 215},
-    ["P90"]         = {Speed = 2400, Gravity = 205},
+    ["MP5"]         = {Speed = 2600, Gravity = 60},
+    ["UMP45"]       = {Speed = 2400, Gravity = 65},
+    ["Vector"]      = {Speed = 2300, Gravity = 70},
+    ["P90"]         = {Speed = 2700, Gravity = 58},
     -- ===== SHOTGUNY =====
-    ["M870"]        = {Speed = 1500, Gravity = 280},
-    ["SPAS-12"]     = {Speed = 1400, Gravity = 285},
-    ["Shotgun"]     = {Speed = 1450, Gravity = 280},
+    ["M870"]        = {Speed = 1600, Gravity = 120},
+    ["SPAS-12"]     = {Speed = 1500, Gravity = 130},
+    ["Shotgun"]     = {Speed = 1550, Gravity = 125},
 }
 
 -- Tabela częściowych dopasowań nazw (fuzzy matching dla AR2)
@@ -1004,15 +994,15 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     local t2 = d2 / math.max(Config.Combat.BulletSpeed, 500)
                     
                     local lead = vel * (t2 * Config.Combat.PredictionMult)
-                    local drop = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t2 * t2), 0)
+                    local drop = Vector3.new(0, 0.5 * (Config.Combat.BulletGravity * Config.Combat.GravityScale) * (t2 * t2), 0)
                     
-                    -- KOMPENSACJA SKOKU: Jeśli cel jest w powietrzu, spada z przyspieszeniem grawitacyjnym
+                    -- KOMPENSACJA SKOKU
                     local targetGravity = Vector3.new(0, 0, 0)
                     if hum.FloorMaterial == Enum.Material.Air then
                         targetGravity = Vector3.new(0, 0.5 * workspace.Gravity * (t2 * t2), 0)
                     end
                     
-                    aimP = aimP + lead - targetGravity + drop
+                    aimP = aimP + lead - targetGravity + drop + Vector3.new(0, Config.Combat.VerticalOffset, 0)
                 end
                 
                 -- Aktualizujemy globalną pozycję dla Silent Aima
