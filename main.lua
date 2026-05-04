@@ -55,6 +55,7 @@ getgenv().SolarConfig = {
     },
     Combat = {
         AimAssist = true,
+        AimKey = Enum.UserInputType.MouseButton2,
         ShowFOV = true,
         FOV = 150,
         MaxDistance = 3000,
@@ -165,6 +166,23 @@ local function CreateSlider(p, t, c, k, min, max, float)
     end))
 end
 
+local function CreateKeybind(p, t, c, k)
+    local B = Instance.new("TextButton", p); B.Size = UDim2.new(1, -10, 0, 38); B.BackgroundColor3 = Config.Colors.Section; B.Text = ""; Round(B, 6)
+    local L = Instance.new("TextLabel", B); L.Size = UDim2.new(1, -100, 1, 0); L.Position = UDim2.new(0, 12, 0, 0); L.Text = t; L.Font = Enum.Font.Gotham; L.TextColor3 = Config.Colors.Text; L.TextSize = 13; L.TextXAlignment = Enum.TextXAlignment.Left; L.BackgroundTransparency = 1
+    local KB = Instance.new("TextButton", B); KB.Size = UDim2.new(0, 100, 0, 24); KB.Position = UDim2.new(1, -110, 0.5, -12); KB.BackgroundColor3 = Config.Colors.Element; KB.Text = Config[c][k].Name; KB.Font = Enum.Font.GothamBold; KB.TextColor3 = Config.Colors.Main; KB.TextSize = 11; Round(KB, 6)
+    local listening = false
+    KB.MouseButton1Click:Connect(function() listening = true; KB.Text = "..." end)
+    table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i)
+        if listening then
+            if i.UserInputType == Enum.UserInputType.Keyboard and i.KeyCode ~= Enum.KeyCode.Unknown then
+                Config[c][k] = i.KeyCode; KB.Text = i.KeyCode.Name; listening = false
+            elseif i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.MouseButton2 or i.UserInputType == Enum.UserInputType.MouseButton3 then
+                Config[c][k] = i.UserInputType; KB.Text = i.UserInputType.Name; listening = false
+            end
+        end
+    end))
+end
+
 local TabVis = CreateTab("Visuals"); local TabCbt = CreateTab("Combat"); local TabSet = CreateTab("Settings"); SelectTab("Visuals")
 
 CreateToggle(TabVis, "Boxes", "BoxESP", "Visuals")
@@ -178,6 +196,7 @@ CreateToggle(TabVis, "Chams (Highlight)", "Chams", "Visuals")
 CreateSlider(TabVis, "Max Distance", "Visuals", "MaxDistance", 100, 10000, false)
 
 CreateToggle(TabCbt, "Aimbot", "AimAssist", "Combat")
+CreateKeybind(TabCbt, "Aim Key", "Combat", "AimKey")
 CreateToggle(TabCbt, "Show FOV", "ShowFOV", "Combat")
 CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
@@ -203,6 +222,7 @@ table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(fun
 -- ==============================================================================
 --[ LOGIKA ESP v5 (ULTRA OPTIMIZED) ]
 -- ==============================================================================
+local CurrentT = nil -- Definicja CurrentT wyżej, by tracery widziały target
 local Cache = { Draw = {}, Chams = {} }
 local SkeletonConns = {{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}}
 
@@ -210,7 +230,8 @@ local function CreateDrawings(p)
     local d = {
         Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"), Corners = {}, CornersOut = {},
         HealthBG = Drawing.new("Square"), Health = Drawing.new("Square"),
-        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text")
+        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text"),
+        Tracer = Drawing.new("Line")
     }
     d.Box.Thickness = 1; d.BoxOut.Thickness = 3; d.BoxOut.Color = Color3.new(0,0,0)
     for i=1, 8 do d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1; d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0) end
@@ -219,12 +240,13 @@ local function CreateDrawings(p)
     d.Dist.Size = 12; d.Dist.Center = true; d.Dist.Outline = true; d.Dist.Font = 2; d.Dist.Color = Config.Colors.Distance
     d.Weapon.Size = 11; d.Weapon.Center = true; d.Weapon.Outline = true; d.Weapon.Font = 2; d.Weapon.Color = Config.Colors.Accent
     d.Team.Size = 11; d.Team.Center = true; d.Team.Outline = true; d.Team.Font = 2; d.Team.Color = Color3.fromRGB(100, 200, 255)
+    d.Tracer.Thickness = 1
     Cache.Draw[p] = d
 end
 
 local function HideAll(p)
     local d = Cache.Draw[p]
-    if d then d.Box.Visible = false; d.BoxOut.Visible = false; for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end; d.Health.Visible = false; d.HealthBG.Visible = false; d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false end
+    if d then d.Box.Visible = false; d.BoxOut.Visible = false; for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end; d.Health.Visible = false; d.HealthBG.Visible = false; d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false end
     if Cache.Chams[p] then Cache.Chams[p].Enabled = false end
 end
 
@@ -286,6 +308,13 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
                     if d.Weapon.Visible then
                         local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
                     end
+
+                    d.Tracer.Visible = Config.Visuals.Tracers
+                    if d.Tracer.Visible then
+                        d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                        d.Tracer.To = Vector2.new(pos.X, bPos.Y + h)
+                        d.Tracer.Color = (CurrentT == p) and Color3.new(0, 1, 0) or Color3.new(1, 1, 1)
+                    end
                 end
 
                 if Config.Visuals.Chams then
@@ -313,7 +342,7 @@ Players.PlayerRemoving:Connect(RemovePlayer)
 -- ==============================================================================
 --[ AIMBOT v5 ]
 -- ==============================================================================
-local CurrentT = nil
+
 
 local WeaponData = {
     ["L96A1"] = {Speed = 4000, Gravity = 150}, ["M24"] = {Speed = 3800, Gravity = 160}, ["AK-47"] = {Speed = 2600, Gravity = 196},
@@ -346,8 +375,8 @@ local function GetClosest()
     return target
 end
 
-table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton2 then Config.State.Aiming = true end end))
-table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton2 then Config.State.Aiming = false end end))
+table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i) if not listening and (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = true end end))
+table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i) if (i.UserInputType == Config.Combat.AimKey or i.KeyCode == Config.Combat.AimKey) then Config.State.Aiming = false end end))
 
 local AimLoop = RunService.RenderStepped:Connect(function()
     if Config.State.Unloaded then return end
