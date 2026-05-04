@@ -65,6 +65,8 @@ getgenv().SolarConfig = {
         TeamCheck = false,
         AdvancedPrediction = true,
         PredictionMult = 1,
+        DynamicAim = true,
+        TriggerBot = false,
         AutoCalibration = true,
         BulletSpeed = 2500,
         BulletGravity = 196.2
@@ -206,8 +208,10 @@ CreateToggle(TabCbt, "Aimbot", "AimAssist", "Combat")
 CreateKeybind(TabCbt, "Aim Key", "Combat", "AimKey")
 CreateToggle(TabCbt, "Show FOV", "ShowFOV", "Combat")
 CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
+CreateToggle(TabCbt, "Dynamic Part Selection", "DynamicAim", "Combat")
+CreateToggle(TabCbt, "TriggerBot", "TriggerBot", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
-CreateSlider(TabCbt, "Prediction Mult", "Combat", "PredictionMult", 0.1, 5, true)
+CreateSlider(TabCbt, "Lead Calibration", "Combat", "PredictionMult", 0.1, 5, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
 
 CreateToggle(TabMisc, "High Jump", "HighJump", "Misc")
@@ -431,26 +435,43 @@ local function GetClosest()
             local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
             local hum = char and char:FindFirstChild("Humanoid")
             if root and hum and hum.Health > 0 then
-                local part = char:FindFirstChild(Config.Combat.AimPart)
-                if part then
-                    local pos, on = Camera:WorldToViewportPoint(part.Position)
-                    local physDist = (root.Position - Camera.CFrame.Position).Magnitude
-                    if on or physDist <= 50 then
-                        local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or Config.Combat.FOV
-                        if physDist <= 50 then mag = physDist - 1000 end
-                        if mag < Config.Combat.FOV then
-                            local visible = IsVisible(part)
-                            if visible then
-                                if mag < bestVisDist then
-                                    bestVisTarget = p
-                                    bestVisDist = mag
+                local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                local forceTarget = (physDist <= 50)
+                
+                local partList = Config.Combat.DynamicAim and {char:FindFirstChild("Head"), char:FindFirstChild("UpperTorso")} or {char:FindFirstChild(Config.Combat.AimPart)}
+                local foundPart = false
+                local bestPartMag = math.huge
+                local anyVisible = false
+                
+                for _, part in ipairs(partList) do
+                    if part then
+                        local pos, on = Camera:WorldToViewportPoint(part.Position)
+                        local mag = on and (Vector2.new(pos.X, pos.Y) - m).Magnitude or (forceTarget and 0 or math.huge)
+                        local vis = IsVisible(part)
+                        
+                        if on or forceTarget then
+                            if vis then
+                                anyVisible = true
+                                if mag < bestPartMag or forceTarget then 
+                                    bestPartMag = forceTarget and (physDist - 1000) or mag
+                                    foundPart = true 
                                 end
-                            else
-                                if physDist < bestPhysDist then
-                                    target = p
-                                    bestPhysDist = physDist
-                                end
+                            elseif not anyVisible and (mag < bestPartMag or forceTarget) then
+                                bestPartMag = forceTarget and (physDist - 1000) or mag
+                                foundPart = true
                             end
+                        end
+                    end
+                end
+                
+                if foundPart then
+                    if anyVisible then
+                        if bestPartMag < bestVisDist then
+                            bestVisTarget = p; bestVisDist = bestPartMag
+                        end
+                    else
+                        if physDist < bestPhysDist then
+                            target = p; bestPhysDist = physDist
                         end
                     end
                 end
@@ -482,18 +503,42 @@ local AimLoop = RunService.RenderStepped:Connect(function()
         UpdateAim()
         if not CurrentT or not CurrentT.Character or CurrentT.Character.Humanoid.Health <= 0 then CurrentT = GetClosest() end
         if CurrentT and CurrentT.Character then
-            local part = CurrentT.Character:FindFirstChild(Config.Combat.AimPart)
+            local part = nil
+            if Config.Combat.DynamicAim then
+                local parts = {CurrentT.Character:FindFirstChild("Head"), CurrentT.Character:FindFirstChild("UpperTorso")}
+                local bestM = math.huge
+                local m = UserInputService:GetMouseLocation()
+                for _, p in ipairs(parts) do
+                    if p and IsVisible(p) then
+                        local pos = Camera:WorldToViewportPoint(p.Position)
+                        local mag = (Vector2.new(pos.X, pos.Y) - m).Magnitude
+                        if mag < bestM then bestM = mag; part = p end
+                    end
+                end
+                if not part then part = CurrentT.Character:FindFirstChild("Head") or CurrentT.Character.PrimaryPart end
+            else
+                part = CurrentT.Character:FindFirstChild(Config.Combat.AimPart)
+            end
+            
             local root = CurrentT.Character:FindFirstChild("HumanoidRootPart")
             if part and root then
                 local aimP = part.Position
                 if Config.Combat.AdvancedPrediction then
                     local d = (Camera.CFrame.Position - aimP).Magnitude
-                    local t = math.clamp(d / math.max(Config.Combat.BulletSpeed, 500), 0, 0.5)
-                    local vel = root.AssemblyLinearVelocity; if vel.Magnitude > 100 then vel = vel.Unit * 100 end
-                    aimP = aimP + (vel * (t * Config.Combat.PredictionMult)) + Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t*t), 0)
+                    local t = d / math.max(Config.Combat.BulletSpeed, 500)
+                    local sensitivity = Config.Combat.PredictionMult
+                    
+                    local vel = root.AssemblyLinearVelocity
+                    if vel.Magnitude > 100 then vel = vel.Unit * 100 end
+                    
+                    local leadOffset = vel * (t * sensitivity)
+                    local dropOffset = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t*t), 0)
+                    
+                    aimP = aimP + leadOffset + dropOffset
                 end
                 local pos, on = Camera:WorldToViewportPoint(aimP)
-                if on then
+                local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                if on or physDist <= 50 then
                     local m = UserInputService:GetMouseLocation()
                     local mx = (pos.X - m.X) * Config.Combat.Smoothness
                     local my = (pos.Y - m.Y) * Config.Combat.Smoothness
@@ -505,12 +550,11 @@ local AimLoop = RunService.RenderStepped:Connect(function()
 end)
 table.insert(getgenv().SolarConnections, AimLoop)
 
-table.insert(getgenv().SolarConnections, UserInputService.JumpRequest:Connect(function()
-    if Config.Misc.HighJump and not Config.State.Unloaded then
+table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.Space and Config.Misc.HighJump and not Config.State.Unloaded then
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if root then
-            -- Force the vertical velocity
             root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, Config.Misc.JumpPower, root.AssemblyLinearVelocity.Z)
         end
     end
@@ -541,6 +585,30 @@ local MiscLoop = RunService.Heartbeat:Connect(function()
     end
 end)
 table.insert(getgenv().SolarConnections, MiscLoop)
+
+local TriggerLoop = RunService.RenderStepped:Connect(function()
+    if Config.State.Unloaded or not Config.Combat.TriggerBot then return end
+    local m = UserInputService:GetMouseLocation()
+    local rayOrigin = Camera.CFrame.Position
+    local rayDirection = Camera:ScreenPointToRay(m.X, m.Y).Direction * 5000
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    rayParams.IgnoreWater = true
+    
+    local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
+    if raycastResult and raycastResult.Instance then
+        local model = raycastResult.Instance:FindFirstAncestorOfClass("Model")
+        if model and Players:GetPlayerFromCharacter(model) and model ~= LocalPlayer.Character then
+            local hum = model:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 then
+                if mouse1click then mouse1click() end
+                task.wait(0.05)
+            end
+        end
+    end
+end)
+table.insert(getgenv().SolarConnections, TriggerLoop)
 
 print("========================================")
 print("   SOLARA AR2 ELITE v5 ZAŁADOWANA!   ")
