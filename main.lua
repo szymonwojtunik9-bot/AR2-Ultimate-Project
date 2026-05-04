@@ -53,6 +53,7 @@ getgenv().SolarConfig = {
         HeliMaxDistance = 5000,
         MaxDistance = 3000,
         MinDistance = 0,
+        ItemESPAUG = false,
         Crosshair = true,
         ESP_FPS_Limit = 1
     },
@@ -71,6 +72,9 @@ getgenv().SolarConfig = {
         DynamicAim = true,
         TriggerBot = false,
         AutoCalibration = true,
+        LegitRCS = false,
+        SilentAim = false,
+        RCSStrength = 5,
         BulletSpeed = 2500,
         BulletGravity = 196.2
     },
@@ -207,6 +211,7 @@ CreateToggle(TabVis, "Off-Screen Arrows", "OffScreenArrows", "Visuals")
 CreateToggle(TabVis, "Chams (Highlight)", "Chams", "Visuals")
 CreateToggle(TabVis, "Helicopter ESP", "HeliESP", "Visuals")
 CreateToggle(TabVis, "Heli Tracers", "HeliTracers", "Visuals")
+CreateToggle(TabVis, "AUG Item ESP", "ItemESPAUG", "Visuals")
 CreateSlider(TabVis, "Max Distance", "Visuals", "MaxDistance", 100, 10000, false)
 
 CreateToggle(TabCbt, "Aimbot", "AimAssist", "Combat")
@@ -216,6 +221,9 @@ CreateToggle(TabCbt, "Wall Check", "WallCheck", "Combat")
 CreateToggle(TabCbt, "Dynamic Part Selection", "DynamicAim", "Combat")
 CreateToggle(TabCbt, "TriggerBot", "TriggerBot", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
+CreateToggle(TabCbt, "Legit RCS", "LegitRCS", "Combat")
+CreateToggle(TabCbt, "Silent Aim (Magic Bullets)", "SilentAim", "Combat")
+CreateSlider(TabCbt, "RCS Strength", "Combat", "RCSStrength", 1, 20, false)
 CreateSlider(TabCbt, "Smoothness", "Combat", "Smoothness", 0.1, 1, true)
 CreateSlider(TabCbt, "Lead Calibration", "Combat", "PredictionMult", 0.1, 5, true)
 CreateSlider(TabCbt, "FOV Size", "Combat", "FOV", 10, 600, false)
@@ -335,11 +343,66 @@ local function RemovePlayer(p)
     if Cache.Chams[p] then pcall(function() Cache.Chams[p]:Destroy() end); Cache.Chams[p] = nil end
 end
 
+-- ==============================================================================
+--[ ITEM ESP v5 (AUG ONLY) ]
+-- ==============================================================================
+local ItemCache = {}
+
+local function CreateItemDrawing(item)
+    local t = Drawing.new("Text")
+    t.Size = 13; t.Center = true; t.Outline = true; t.Color = Color3.fromRGB(0, 255, 255)
+    t.Visible = false
+    ItemCache[item] = t
+end
+
+local ItemESPLoop = RunService.RenderStepped:Connect(function()
+    if Config.State.Unloaded or not Config.Visuals.ItemESPAUG then
+        for i, v in pairs(ItemCache) do v.Visible = false end
+        return
+    end
+
+    -- Skanowanie przedmiotów co sekundę (oszczędność wydajności)
+    if tick() % 1 < 0.05 then
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj.Name == "AUG" and not ItemCache[obj] then
+                CreateItemDrawing(obj)
+            end
+        end
+    end
+
+    for item, draw in pairs(ItemCache) do
+        if not item or not item.Parent then
+            draw:Remove()
+            ItemCache[item] = nil
+            continue
+        end
+
+        local pos = item:IsA("BasePart") and item.Position or (item:IsA("Model") and item:GetPivot().Position)
+        if pos then
+            local dist = (Camera.CFrame.Position - pos).Magnitude
+            if dist < Config.Visuals.MaxDistance then
+                local scr, on = Camera:WorldToViewportPoint(pos)
+                if on then
+                    draw.Position = Vector2.new(scr.X, scr.Y)
+                    draw.Text = "[AUG] [" .. math.floor(dist) .. "m]"
+                    draw.Visible = true
+                else
+                    draw.Visible = false
+                end
+            else
+                draw.Visible = false
+            end
+        end
+    end
+end)
+table.insert(getgenv().SolarConnections, ItemESPLoop)
+
 getgenv().ClearESP = function()
     for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end
     for heli, _ in pairs(HeliCache or {}) do
         for _, v in pairs(heli) do pcall(function() v:Remove() end) end
     end
+    for _, v in pairs(ItemCache) do pcall(function() v:Remove() end) end
 end
 
 -- Pre-allocowane stałe (nie tworzone w pętli = zero GC)
@@ -722,7 +785,7 @@ local AimLoop = RunService.RenderStepped:Connect(function()
         local char = CurrentT and CurrentT.Character
         local hum  = char and char:FindFirstChild("Humanoid")
         
-        -- TARGET LOCK: Dopóki cel żyje i trzymamy bind, nie zmieniamy celu
+        -- TARGET LOCK: Dopóki cel żyje i trzymamy bind (dla zwykłego Aima) lub zawsze (dla Silent), nie zmieniamy celu zbyt pochopnie
         if not CurrentT or not char or not hum or hum.Health <= 0 then
             CurrentT = GetClosest()
         end
@@ -770,38 +833,58 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                     aimP = aimP + lead - targetGravity + drop
                 end
                 
+                -- Aktualizujemy globalną pozycję dla Silent Aima
+                getgenv().PredictedPosition = aimP
+                
                 local scr, on = Camera:WorldToViewportPoint(aimP)
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
+                
+                -- Jeśli uzywamy Silent Aim, omijamy przesuwanie myszki z AimLoop
+                if Config.Combat.SilentAim then
+                    -- Silent Aim załatwi to przez hooka, tu tylko celownik/obliczenia są potrzebne
+                    return
+                end
                 
                 if on then
                     local m  = UserInputService:GetMouseLocation()
                     local dx = scr.X - m.X
                     local dy = scr.Y - m.Y
                     
-                    -- Dynamiczne wygładzanie ruchu (Dynamic Easing)
+                    -- Dynamiczne wygładzanie ruchu
                     local dist = math.sqrt(dx*dx + dy*dy)
                     local dynSmooth = Config.Combat.Smoothness
+                    local mx, my = 0, 0
                     
-                    -- Jeśli celownik jest bardzo blisko celu (<25px), zwalniamy myszkę żeby uniknąć drgania (jitteringu)
-                    if dist < 25 then
-                        dynSmooth = dynSmooth * math.max(0.2, (dist / 25))
-                    end
-                    
-                    local mx = dx * dynSmooth
-                    local my = dy * dynSmooth
-                    
-                    -- Wymuszamy minimalny ruch 1px by dotrzeć do celu jeśli jest poza "deadzone" (1px)
-                    if dist > 1.5 then
-                        if math.abs(mx) > 0 and math.abs(mx) < 1 then mx = math.sign(dx) end
-                        if math.abs(my) > 0 and math.abs(my) < 1 then my = math.sign(dy) end
+                    if dynSmooth >= 1 then
+                        -- TRYB ABSOLUTNY (MAX SPEED): Brak zwalniania, brak blokad prędkości. 
+                        -- Idealnie przykleja celownik do głowy, nigdy jej nie gubi.
+                        mx = dx
+                        my = dy
                     else
-                        -- Celownik idealnie na głowie, nie ruszamy myszką
-                        mx, my = 0, 0
+                        -- TRYB LEGIT (Smoothness < 1): Płynne dojeżdżanie z deadzonem
+                        if dist < 25 then
+                            dynSmooth = dynSmooth * math.max(0.2, (dist / 25))
+                        end
+                        
+                        mx = dx * dynSmooth
+                        my = dy * dynSmooth
+                        
+                        if dist > 1.5 then
+                            if math.abs(mx) > 0 and math.abs(mx) < 1 then mx = math.sign(dx) end
+                            if math.abs(my) > 0 and math.abs(my) < 1 then my = math.sign(dy) end
+                        else
+                            mx, my = 0, 0
+                        end
+                        
+                        -- Clamp tylko dla trybu Legit żeby nie rzucało ekranem
+                        mx = math.clamp(mx, -100, 100)
+                        my = math.clamp(my, -100, 100)
                     end
                     
-                    -- Hard cap na max 100px na klatkę dla płynności
-                    mx = math.clamp(mx, -100, 100)
-                    my = math.clamp(my, -100, 100)
+                    -- Legit RCS: Jeśli strzelasz, dodajemy dodatkowy ruch w dół
+                    if Config.Combat.LegitRCS and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                        my = my + Config.Combat.RCSStrength
+                    end
                     
                     if mousemoverel and (mx ~= 0 or my ~= 0) then mousemoverel(mx, my) end
                 elseif physDist <= 50 then
@@ -817,6 +900,63 @@ local AimLoop = RunService.RenderStepped:Connect(function()
     end
 end)
 table.insert(getgenv().SolarConnections, AimLoop)
+
+-- ==============================================================================
+--[ SILENT AIM HOOK (MAGIC BULLETS) ]
+-- ==============================================================================
+getgenv().PredictedPosition = nil
+
+if getrawmetatable and setreadonly then
+    local mt = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    
+    if setreadonly then setreadonly(mt, false) end
+    
+    mt.__namecall = newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Hookujemy Raycast (najpopularniejsza metoda detekcji strzałów)
+        if method == "Raycast" and Config.Combat.SilentAim and Config.State.Aiming and getgenv().PredictedPosition then
+            -- Sprawdzamy czy to Raycast od broni gracza (zwykle używają workspace:Raycast)
+            -- Sprawdzamy też czy Raycast wychodzi z kamery lub z lufy broni
+            local origin = args[1]
+            local direction = args[2]
+            
+            -- Jeśli origin to prawdopodobnie lufa lub kamera, zmieniamy direction na głowę celu
+            if typeof(origin) == "Vector3" and typeof(direction) == "Vector3" then
+                -- Omijamy raycasty UI lub inne systemy
+                local camPos = Camera.CFrame.Position
+                local distToOrigin = (origin - camPos).Magnitude
+                
+                if distToOrigin < 15 then -- Origin jest blisko naszej postaci
+                    args[2] = (getgenv().PredictedPosition - origin).Unit * direction.Magnitude
+                    return oldNamecall(self, unpack(args))
+                end
+            end
+        end
+        
+        -- Fallback: Hookujemy FindPartOnRayWithIgnoreList (Stary system często używany przez AR2)
+        if method == "FindPartOnRayWithIgnoreList" and Config.Combat.SilentAim and Config.State.Aiming and getgenv().PredictedPosition then
+            local ray = args[1]
+            if typeof(ray) == "Ray" then
+                local origin = ray.Origin
+                local camPos = Camera.CFrame.Position
+                local distToOrigin = (origin - camPos).Magnitude
+                
+                if distToOrigin < 15 then
+                    local newDirection = (getgenv().PredictedPosition - origin).Unit * ray.Direction.Magnitude
+                    args[1] = Ray.new(origin, newDirection)
+                    return oldNamecall(self, unpack(args))
+                end
+            end
+        end
+
+        return oldNamecall(self, ...)
+    end)
+    
+    if setreadonly then setreadonly(mt, true) end
+end
 
 table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if input.KeyCode == Enum.KeyCode.Space and Config.Misc.HighJump and not Config.State.Unloaded then
