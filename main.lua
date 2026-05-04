@@ -1,6 +1,6 @@
 -- ==============================================================================
---[ AR2 ULTIMATE PRO - v5 (ULTRA OPTIMIZED) ]
--- Naprawiono lagi, zoptymalizowano rysowanie i dodano super-czyszczenie.
+--[ AR2 ULTIMATE PRO - v6 (SOLARA v3 OPTIMIZED) ]
+-- Naprawiono: continue, dup config, FOVRing, memory leaks, performance
 -- ==============================================================================
 
 -- 1. SUPER CZYSZCZENIE (Usuwamy wszystko co stare)
@@ -21,6 +21,9 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
@@ -35,7 +38,7 @@ local SafeGui = (gethui and gethui()) or CoreGui
 getgenv().SolarConnections = {}
 
 -- ==============================================================================
---[ KONFIGURACJA v5 ]
+--[ KONFIGURACJA v6 (naprawiono duplikaty) ]
 -- ==============================================================================
 getgenv().SolarConfig = {
     Visuals = {
@@ -56,7 +59,8 @@ getgenv().SolarConfig = {
         ItemESPAUG = false,
         Crosshair = true,
         TextSize = 13,
-        ESP_FPS_Limit = 1
+        ESP_FPS_Limit = 1,
+        BulletTracers = false,
     },
     Combat = {
         AimAssist = true,
@@ -79,7 +83,8 @@ getgenv().SolarConfig = {
         BulletSpeed = 3000,
         BulletGravity = 45,
         GravityScale = 1,
-        VerticalOffset = 0
+        VerticalOffset = 0,
+        HitSound = false,
     },
     Misc = {
         HighJump = false,
@@ -92,15 +97,8 @@ getgenv().SolarConfig = {
         Streamproof = false,
         FakeLag = false,
         SpeedHack = false,
-        SpeedMultiplier = 1.2
-    },
-    Visuals = {
-        -- ...
-        BulletTracers = false,
-    },
-    Combat = {
-        -- ...
-        HitSound = false,
+        SpeedMultiplier = 1.2,
+        TurboFPS = false,
     },
     Colors = {
         Main = Color3.fromRGB(138, 43, 226),
@@ -111,133 +109,342 @@ getgenv().SolarConfig = {
         Text = Color3.fromRGB(240, 240, 240),
         TextDark = Color3.fromRGB(150, 150, 150),
         Enemy = Color3.fromRGB(255, 60, 60),
-        Distance = Color3.fromRGB(255, 215, 0), -- Golden Xeno Style
+        Distance = Color3.fromRGB(255, 215, 0),
         HealthHigh = Color3.fromRGB(100, 255, 100),
-        HealthMid = Color3.fromRGB(255, 200, 100),
+        HealthMid = Color3.fromRGB(200, 200, 100),
         HealthLow = Color3.fromRGB(255, 100, 100),
     },
     State = { Aiming = false, Unloaded = false, Rainbow = true }
 }
 local Config = getgenv().SolarConfig
 
-local function Tween(obj, props, time) TweenService:Create(obj, TweenInfo.new(time or 0.2), props):Play() end
-local function Round(obj, r) local c = Instance.new("UICorner", obj); c.CornerRadius = UDim.new(0, r or 6); return c end
+-- Solara v3: sprawdź czy mousemoverel istnieje (niektóre executory go nie mają)
+local HAS_MOUSE_MOVE = (type(mousemoverel) == "function")
+local HAS_MOUSE_CLICK = (type(mouse1click) == "function")
+
+local function Tween(obj, props, time)
+    TweenService:Create(obj, TweenInfo.new(time or 0.2), props):Play()
+end
+
+local function Round(obj, r)
+    local c = Instance.new("UICorner", obj)
+    c.CornerRadius = UDim.new(0, r or 6)
+    return c
+end
 
 -- Cache oryginalnych ustawień (do resetu)
 local OriginalLighting = {
-    Brightness = game:GetService("Lighting").Brightness,
-    ClockTime = game:GetService("Lighting").ClockTime,
-    GlobalShadows = game:GetService("Lighting").GlobalShadows,
-    OutdoorAmbient = game:GetService("Lighting").OutdoorAmbient
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    GlobalShadows = Lighting.GlobalShadows,
+    OutdoorAmbient = Lighting.OutdoorAmbient
 }
 local OriginalHeadSizes = {}
 local OriginalHeadColors = {}
 local OriginalHeadMats = {}
 
 -- ==============================================================================
---[ UI v5 ]
+--[ UI v6 ]
 -- ==============================================================================
-local ScreenGui = Instance.new("ScreenGui"); ScreenGui.Name = "SolarMenu_v5"; ScreenGui.ResetOnSpawn = false; ScreenGui.Parent = SafeGui
-local MainFrame = Instance.new("Frame", ScreenGui); MainFrame.Size = UDim2.new(0, 520, 0, 400); MainFrame.Position = UDim2.new(0.5, -260, 0.5, -200)
-MainFrame.BackgroundColor3 = Config.Colors.Background; MainFrame.BorderSizePixel = 0; MainFrame.Active = true; Round(MainFrame, 10)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SolarMenu_v6"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = SafeGui
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 520, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -260, 0.5, -200)
+MainFrame.BackgroundColor3 = Config.Colors.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+Round(MainFrame, 10)
 Instance.new("UIStroke", MainFrame).Color = Config.Colors.Main
 
 -- Dragging
 local dragT, dragS, startP
-MainFrame.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragT = true; dragS = i.Position; startP = MainFrame.Position end end)
-UserInputService.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement and dragT then local d = i.Position - dragS; MainFrame.Position = UDim2.new(startP.X.Scale, startP.X.Offset + d.X, startP.Y.Scale, startP.Y.Offset + d.Y) end end)
-UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragT = false end end)
+MainFrame.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragT = true
+        dragS = i.Position
+        startP = MainFrame.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseMovement and dragT then
+        local d = i.Position - dragS
+        MainFrame.Position = UDim2.new(startP.X.Scale, startP.X.Offset + d.X, startP.Y.Scale, startP.Y.Offset + d.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragT = false
+    end
+end)
 
-local Sidebar = Instance.new("Frame", MainFrame); Sidebar.Size = UDim2.new(0, 140, 1, 0); Sidebar.BackgroundColor3 = Config.Colors.Section; Sidebar.BorderSizePixel = 0; Round(Sidebar, 10)
-local SideFix = Instance.new("Frame", Sidebar); SideFix.Size = UDim2.new(0, 10, 1, 0); SideFix.Position = UDim2.new(1, -10, 0, 0); SideFix.BackgroundColor3 = Config.Colors.Section; Sidebar.ZIndex = 2
-local Content = Instance.new("Frame", MainFrame); Content.Size = UDim2.new(1, -150, 1, -20); Content.Position = UDim2.new(0, 150, 0, 10); Content.BackgroundTransparency = 1
+local Sidebar = Instance.new("Frame", MainFrame)
+Sidebar.Size = UDim2.new(0, 140, 1, 0)
+Sidebar.BackgroundColor3 = Config.Colors.Section
+Sidebar.BorderSizePixel = 0
+Round(Sidebar, 10)
+
+local SideFix = Instance.new("Frame", Sidebar)
+SideFix.Size = UDim2.new(0, 10, 1, 0)
+SideFix.Position = UDim2.new(1, -10, 0, 0)
+SideFix.BackgroundColor3 = Config.Colors.Section
+Sidebar.ZIndex = 2
+
+local Content = Instance.new("Frame", MainFrame)
+Content.Size = UDim2.new(1, -150, 1, -20)
+Content.Position = UDim2.new(0, 150, 0, 10)
+Content.BackgroundTransparency = 1
 
 -- Rainbow Footer Logic (Xeno style)
 local Footer = Instance.new("TextLabel", Sidebar)
-Footer.Size = UDim2.new(1, 0, 0, 20); Footer.Position = UDim2.new(0, 0, 1, -25)
-Footer.BackgroundTransparency = 1; Footer.Text = "Made by Antigravity x Xeno"; Footer.Font = Enum.Font.GothamBold
-Footer.TextSize = 11; Footer.TextColor3 = Config.Colors.Main
+Footer.Size = UDim2.new(1, 0, 0, 20)
+Footer.Position = UDim2.new(0, 0, 1, -25)
+Footer.BackgroundTransparency = 1
+Footer.Text = "Made by Antigravity x Xeno"
+Footer.Font = Enum.Font.GothamBold
+Footer.TextSize = 11
+Footer.TextColor3 = Config.Colors.Main
 
 task.spawn(function()
-    while task.wait() do
+    local _hue = 0
+    while true do
+        task.wait(0.03)
         if Config.State.Unloaded then break end
         if Config.State.Rainbow then
-            local hue = tick() % 5 / 5
-            Footer.TextColor3 = Color3.fromHSV(hue, 0.8, 1)
+            _hue = _hue + 0.005
+            if _hue > 1 then _hue = _hue - 1 end
+            Footer.TextColor3 = Color3.fromHSV(_hue, 0.8, 1)
         end
     end
 end)
-local Tabs = {}; local TabFrames = {}
+
+local Tabs = {}
+local TabFrames = {}
 
 local function SelectTab(n)
-    for name, f in pairs(TabFrames) do 
+    for name, f in pairs(TabFrames) do
         if name == n then
             f.Visible = true
             f.GroupTransparency = 1
             Tween(f, {GroupTransparency = 0}, 0.3)
         else
-            f.Visible = false 
+            f.Visible = false
         end
     end
-    for name, b in pairs(Tabs) do if name == n then Tween(b, {BackgroundColor3 = Config.Colors.Main, TextColor3 = Color3.new(1,1,1)}) else Tween(b, {BackgroundColor3 = Config.Colors.Element, TextColor3 = Config.Colors.TextDark}) end end
+    for name, b in pairs(Tabs) do
+        if name == n then
+            Tween(b, {BackgroundColor3 = Config.Colors.Main, TextColor3 = Color3.new(1,1,1)})
+        else
+            Tween(b, {BackgroundColor3 = Config.Colors.Element, TextColor3 = Config.Colors.TextDark})
+        end
+    end
 end
 
 local function CreateTab(n)
-    local B = Instance.new("TextButton", Sidebar); B.Size = UDim2.new(0, 120, 0, 35); B.BackgroundColor3 = Config.Colors.Element; B.Text = n; B.Font = Enum.Font.GothamBold; B.TextColor3 = Config.Colors.TextDark; B.TextSize = 13; B.AutoButtonColor = false; Round(B, 6)
-    local F = Instance.new("CanvasGroup", Content); F.Size = UDim2.new(1, 0, 1, 0); F.BackgroundTransparency = 1; F.Visible = false
-    local SC = Instance.new("ScrollingFrame", F); SC.Size = UDim2.new(1, 0, 1, 0); SC.BackgroundTransparency = 1; SC.ScrollBarThickness = 2; SC.BorderSizePixel = 0
-    local L = Instance.new("UIListLayout", SC); L.Padding = UDim.new(0, 8); L.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    L:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() SC.CanvasSize = UDim2.new(0, 0, 0, L.AbsoluteContentSize.Y + 10) end)
-    Tabs[n] = B; TabFrames[n] = F; B.MouseButton1Click:Connect(function() SelectTab(n) end)
+    local B = Instance.new("TextButton", Sidebar)
+    B.Size = UDim2.new(0, 120, 0, 35)
+    B.BackgroundColor3 = Config.Colors.Element
+    B.Text = n
+    B.Font = Enum.Font.GothamBold
+    B.TextColor3 = Config.Colors.TextDark
+    B.TextSize = 13
+    B.AutoButtonColor = false
+    Round(B, 6)
+
+    local F = Instance.new("CanvasGroup", Content)
+    F.Size = UDim2.new(1, 0, 1, 0)
+    F.BackgroundTransparency = 1
+    F.Visible = false
+
+    local SC = Instance.new("ScrollingFrame", F)
+    SC.Size = UDim2.new(1, 0, 1, 0)
+    SC.BackgroundTransparency = 1
+    SC.ScrollBarThickness = 2
+    SC.BorderSizePixel = 0
+
+    local L = Instance.new("UIListLayout", SC)
+    L.Padding = UDim.new(0, 8)
+    L.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    L:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        SC.CanvasSize = UDim2.new(0, 0, 0, L.AbsoluteContentSize.Y + 10)
+    end)
+
+    Tabs[n] = B
+    TabFrames[n] = F
+    B.MouseButton1Click:Connect(function()
+        SelectTab(n)
+    end)
     return SC
 end
 
-local TabListL = Instance.new("UIListLayout", Sidebar); TabListL.Padding = UDim.new(0, 5); TabListL.HorizontalAlignment = Enum.HorizontalAlignment.Center; TabListL.SortOrder = Enum.SortOrder.LayoutOrder; Instance.new("UIPadding", Sidebar).PaddingTop = UDim.new(0, 50)
+local TabListL = Instance.new("UIListLayout", Sidebar)
+TabListL.Padding = UDim.new(0, 5)
+TabListL.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabListL.SortOrder = Enum.SortOrder.LayoutOrder
+Instance.new("UIPadding", Sidebar).PaddingTop = UDim.new(0, 50)
 
 local function CreateToggle(p, t, k, c)
-    local B = Instance.new("TextButton", p); B.Size = UDim2.new(1, -10, 0, 38); B.BackgroundColor3 = Config.Colors.Section; B.Text = ""; Round(B, 6)
-    local L = Instance.new("TextLabel", B); L.Size = UDim2.new(1, -60, 1, 0); L.Position = UDim2.new(0, 12, 0, 0); L.Text = t; L.Font = Enum.Font.Gotham; L.TextColor3 = Config.Colors.Text; L.TextSize = 13; L.TextXAlignment = Enum.TextXAlignment.Left; L.BackgroundTransparency = 1
-    local SB = Instance.new("Frame", B); SB.Size = UDim2.new(0, 32, 0, 16); SB.Position = UDim2.new(1, -40, 0.5, -8); SB.BackgroundColor3 = Config[c][k] and Config.Colors.Main or Config.Colors.Element; Round(SB, 8)
-    local SK = Instance.new("Frame", SB); SK.Size = UDim2.new(0, 12, 0, 12); SK.Position = Config[c][k] and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6); SK.BackgroundColor3 = Color3.new(1,1,1); Round(SK, 6)
-    B.MouseButton1Click:Connect(function() local s = not Config[c][k]; Config[c][k] = s; Tween(SB, {BackgroundColor3 = s and Config.Colors.Main or Config.Colors.Element}, 0.2); Tween(SK, {Position = s and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)}, 0.2) end)
+    local B = Instance.new("TextButton", p)
+    B.Size = UDim2.new(1, -10, 0, 38)
+    B.BackgroundColor3 = Config.Colors.Section
+    B.Text = ""
+    Round(B, 6)
+
+    local L = Instance.new("TextLabel", B)
+    L.Size = UDim2.new(1, -60, 1, 0)
+    L.Position = UDim2.new(0, 12, 0, 0)
+    L.Text = t
+    L.Font = Enum.Font.Gotham
+    L.TextColor3 = Config.Colors.Text
+    L.TextSize = 13
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+
+    local SB = Instance.new("Frame", B)
+    SB.Size = UDim2.new(0, 32, 0, 16)
+    SB.Position = UDim2.new(1, -40, 0.5, -8)
+    SB.BackgroundColor3 = Config[c][k] and Config.Colors.Main or Config.Colors.Element
+    Round(SB, 8)
+
+    local SK = Instance.new("Frame", SB)
+    SK.Size = UDim2.new(0, 12, 0, 12)
+    SK.Position = Config[c][k] and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+    SK.BackgroundColor3 = Color3.new(1,1,1)
+    Round(SK, 6)
+
+    B.MouseButton1Click:Connect(function()
+        local s = not Config[c][k]
+        Config[c][k] = s
+        Tween(SB, {BackgroundColor3 = s and Config.Colors.Main or Config.Colors.Element}, 0.2)
+        Tween(SK, {Position = s and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)}, 0.2)
+    end)
 end
 
 local function CreateSlider(p, t, c, k, min, max, float)
-    local Cont = Instance.new("Frame", p); Cont.Size = UDim2.new(1, -10, 0, 45); Cont.BackgroundColor3 = Config.Colors.Section; Round(Cont, 6)
-    local L = Instance.new("TextLabel", Cont); L.Size = UDim2.new(1, -20, 0, 18); L.Position = UDim2.new(0, 12, 0, 4); L.Text = t; L.Font = Enum.Font.Gotham; L.TextColor3 = Config.Colors.Text; L.TextSize = 12; L.TextXAlignment = Enum.TextXAlignment.Left; L.BackgroundTransparency = 1
-    local VL = Instance.new("TextLabel", Cont); VL.Size = UDim2.new(0, 40, 0, 18); VL.Position = UDim2.new(1, -50, 0, 4); VL.Text = tostring(Config[c][k]); VL.Font = Enum.Font.GothamBold; VL.TextColor3 = Config.Colors.Main; VL.TextSize = 12; VL.BackgroundTransparency = 1
-    local BG = Instance.new("Frame", Cont); BG.Size = UDim2.new(1, -24, 0, 4); BG.Position = UDim2.new(0, 12, 0, 28); BG.BackgroundColor3 = Config.Colors.Element; Round(BG, 2)
-    local F = Instance.new("Frame", BG); local scale = (Config[c][k] - min) / (max - min); F.Size = UDim2.new(scale, 0, 1, 0); F.BackgroundColor3 = Config.Colors.Main; Round(F, 2)
-    local SB = Instance.new("TextButton", BG); SB.Size = UDim2.new(1, 0, 1, 0); SB.BackgroundTransparency = 1; SB.Text = ""
-    local sliding = false; SB.MouseButton1Down:Connect(function() sliding = true end)
-    table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then sliding = false end end))
+    local Cont = Instance.new("Frame", p)
+    Cont.Size = UDim2.new(1, -10, 0, 45)
+    Cont.BackgroundColor3 = Config.Colors.Section
+    Round(Cont, 6)
+
+    local L = Instance.new("TextLabel", Cont)
+    L.Size = UDim2.new(1, -20, 0, 18)
+    L.Position = UDim2.new(0, 12, 0, 4)
+    L.Text = t
+    L.Font = Enum.Font.Gotham
+    L.TextColor3 = Config.Colors.Text
+    L.TextSize = 12
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+
+    local VL = Instance.new("TextLabel", Cont)
+    VL.Size = UDim2.new(0, 40, 0, 18)
+    VL.Position = UDim2.new(1, -50, 0, 4)
+    VL.Text = tostring(Config[c][k])
+    VL.Font = Enum.Font.GothamBold
+    VL.TextColor3 = Config.Colors.Main
+    VL.TextSize = 12
+    VL.BackgroundTransparency = 1
+
+    local BG = Instance.new("Frame", Cont)
+    BG.Size = UDim2.new(1, -24, 0, 4)
+    BG.Position = UDim2.new(0, 12, 0, 28)
+    BG.BackgroundColor3 = Config.Colors.Element
+    Round(BG, 2)
+
+    local F = Instance.new("Frame", BG)
+    local scale = (Config[c][k] - min) / (max - min)
+    F.Size = UDim2.new(scale, 0, 1, 0)
+    F.BackgroundColor3 = Config.Colors.Main
+    Round(F, 2)
+
+    local SB = Instance.new("TextButton", BG)
+    SB.Size = UDim2.new(1, 0, 1, 0)
+    SB.BackgroundTransparency = 1
+    SB.Text = ""
+
+    local sliding = false
+    SB.MouseButton1Down:Connect(function()
+        sliding = true
+    end)
+
+    table.insert(getgenv().SolarConnections, UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            sliding = false
+        end
+    end))
+
     table.insert(getgenv().SolarConnections, RunService.RenderStepped:Connect(function()
         if sliding then
-            local p = math.clamp((UserInputService:GetMouseLocation().X - BG.AbsolutePosition.X) / BG.AbsoluteSize.X, 0, 1)
-            local v = min + ((max - min) * p); v = float and (math.floor(v * 100) / 100) or math.floor(v); Config[c][k] = v
-            F.Size = UDim2.new(p, 0, 1, 0); VL.Text = tostring(v)
+            local mx = UserInputService:GetMouseLocation().X
+            local absPos = BG.AbsolutePosition.X
+            local absSize = BG.AbsoluteSize.X
+            if absSize <= 0 then return end
+            local p = math.clamp((mx - absPos) / absSize, 0, 1)
+            local v = min + ((max - min) * p)
+            v = float and (math.floor(v * 100) / 100) or math.floor(v)
+            Config[c][k] = v
+            F.Size = UDim2.new(p, 0, 1, 0)
+            VL.Text = tostring(v)
         end
     end))
 end
 
 local function CreateKeybind(p, t, c, k)
-    local B = Instance.new("TextButton", p); B.Size = UDim2.new(1, -10, 0, 38); B.BackgroundColor3 = Config.Colors.Section; B.Text = ""; Round(B, 6)
-    local L = Instance.new("TextLabel", B); L.Size = UDim2.new(1, -100, 1, 0); L.Position = UDim2.new(0, 12, 0, 0); L.Text = t; L.Font = Enum.Font.Gotham; L.TextColor3 = Config.Colors.Text; L.TextSize = 13; L.TextXAlignment = Enum.TextXAlignment.Left; L.BackgroundTransparency = 1
-    local KB = Instance.new("TextButton", B); KB.Size = UDim2.new(0, 100, 0, 24); KB.Position = UDim2.new(1, -110, 0.5, -12); KB.BackgroundColor3 = Config.Colors.Element; KB.Text = Config[c][k].Name; KB.Font = Enum.Font.GothamBold; KB.TextColor3 = Config.Colors.Main; KB.TextSize = 11; Round(KB, 6)
+    local B = Instance.new("TextButton", p)
+    B.Size = UDim2.new(1, -10, 0, 38)
+    B.BackgroundColor3 = Config.Colors.Section
+    B.Text = ""
+    Round(B, 6)
+
+    local L = Instance.new("TextLabel", B)
+    L.Size = UDim2.new(1, -100, 1, 0)
+    L.Position = UDim2.new(0, 12, 0, 0)
+    L.Text = t
+    L.Font = Enum.Font.Gotham
+    L.TextColor3 = Config.Colors.Text
+    L.TextSize = 13
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+
+    local KB = Instance.new("TextButton", B)
+    KB.Size = UDim2.new(0, 100, 0, 24)
+    KB.Position = UDim2.new(1, -110, 0.5, -12)
+    KB.BackgroundColor3 = Config.Colors.Element
+    KB.Text = typeof(Config[c][k]) == "EnumItem" and Config[c][k].Name or tostring(Config[c][k])
+    KB.Font = Enum.Font.GothamBold
+    KB.TextColor3 = Config.Colors.Main
+    KB.TextSize = 11
+    Round(KB, 6)
+
     local listening = false
-    KB.MouseButton1Click:Connect(function() listening = true; KB.Text = "..." end)
+    KB.MouseButton1Click:Connect(function()
+        listening = true
+        KB.Text = "..."
+    end)
+
     table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i)
         if listening then
             if i.UserInputType == Enum.UserInputType.Keyboard and i.KeyCode ~= Enum.KeyCode.Unknown then
-                Config[c][k] = i.KeyCode; KB.Text = i.KeyCode.Name; listening = false
+                Config[c][k] = i.KeyCode
+                KB.Text = i.KeyCode.Name
+                listening = false
             elseif i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.MouseButton2 or i.UserInputType == Enum.UserInputType.MouseButton3 then
-                Config[c][k] = i.UserInputType; KB.Text = i.UserInputType.Name; listening = false
+                Config[c][k] = i.UserInputType
+                KB.Text = i.UserInputType.Name
+                listening = false
             end
         end
     end))
 end
 
-local TabVis = CreateTab("Visuals"); local TabCbt = CreateTab("Combat"); local TabMisc = CreateTab("Misc"); local TabSet = CreateTab("Settings"); SelectTab("Visuals")
+local TabVis = CreateTab("Visuals")
+local TabCbt = CreateTab("Combat")
+local TabMisc = CreateTab("Misc")
+local TabSet = CreateTab("Settings")
+SelectTab("Visuals")
 
 CreateToggle(TabVis, "Boxes", "BoxESP", "Visuals")
 CreateToggle(TabVis, "Health Bar", "HealthBar", "Visuals")
@@ -251,6 +458,7 @@ CreateToggle(TabVis, "Helicopter ESP", "HeliESP", "Visuals")
 CreateToggle(TabVis, "Heli Tracers", "HeliTracers", "Visuals")
 CreateToggle(TabVis, "AUG Item ESP", "ItemESPAUG", "Visuals")
 CreateToggle(TabVis, "Custom Crosshair", "Crosshair", "Visuals")
+CreateToggle(TabVis, "Bullet Tracers", "BulletTracers", "Visuals")
 CreateSlider(TabVis, "ESP Text Size", "Visuals", "TextSize", 8, 24, false)
 CreateSlider(TabVis, "Max Distance", "Visuals", "MaxDistance", 100, 10000, false)
 
@@ -263,6 +471,7 @@ CreateToggle(TabCbt, "TriggerBot", "TriggerBot", "Combat")
 CreateToggle(TabCbt, "Advanced Physics", "AdvancedPrediction", "Combat")
 CreateToggle(TabCbt, "Legit RCS", "LegitRCS", "Combat")
 CreateToggle(TabCbt, "Silent Aim (Magic Bullets)", "SilentAim", "Combat")
+CreateToggle(TabCbt, "Hit Sound (Bell)", "HitSound", "Combat")
 CreateSlider(TabCbt, "RCS Strength", "Combat", "RCSStrength", 1, 20, false)
 CreateSlider(TabCbt, "Smoothness", "Combat", "Smoothness", 0.1, 1, true)
 CreateSlider(TabCbt, "Lead Calibration", "Combat", "PredictionMult", 0.1, 5, true)
@@ -281,18 +490,84 @@ CreateToggle(TabMisc, "Streamproof (Hide UI)", "Streamproof", "Misc")
 CreateToggle(TabMisc, "Fake Lag (HvH)", "FakeLag", "Misc")
 CreateToggle(TabMisc, "Speed Hack", "SpeedHack", "Misc")
 CreateSlider(TabMisc, "Speed Multi", "Misc", "SpeedMultiplier", 1, 3, true)
+CreateToggle(TabMisc, "Turbo FPS (No Textures)", "TurboFPS", "Misc")
 
-CreateToggle(TabVis, "Bullet Tracers", "BulletTracers", "Visuals")
-CreateToggle(TabCbt, "Hit Sound (Bell)", "HitSound", "Combat")
+-- Funkcja optymalizująca silnik Roblox
+local function OptimizeGame()
+    if not Config.Misc.TurboFPS then return end
+    
+    for _, v in pairs(game:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.Material = Enum.Material.SmoothPlastic
+        elseif v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+            v.Enabled = false
+        elseif v:IsA("Explosion") then
+            v.Visible = false
+        end
+    end
+    
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 9e9
+    Lighting.Brightness = 2
+end
+
+-- Pętla optymalizacji (co 5 sekund, żeby nie obciążać CPU)
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if Config.State.Unloaded then break end
+        if Config.Misc.TurboFPS then
+            pcall(OptimizeGame)
+        end
+        if Config.Misc.Fullbright then
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 12
+            Lighting.FogEnd = 9e9
+            Lighting.GlobalShadows = false
+        end
+    end
+end)
 
 local HttpService = game:GetService("HttpService")
-local CfgName = "AR2_SolarV5_Config.json"
+local CfgName = "AR2_SolarV6_Config.json"
 
-local SaveBtn = Instance.new("TextButton", TabSet); SaveBtn.Size = UDim2.new(1, -10, 0, 45); SaveBtn.BackgroundColor3 = Config.Colors.Element; SaveBtn.Text = "ZAPISZ CONFIG"; SaveBtn.Font = Enum.Font.GothamBold; SaveBtn.TextColor3 = Color3.new(1,1,1); SaveBtn.TextSize = 14; Round(SaveBtn, 8)
-local LoadBtn = Instance.new("TextButton", TabSet); LoadBtn.Size = UDim2.new(1, -10, 0, 45); LoadBtn.BackgroundColor3 = Config.Colors.Element; LoadBtn.Text = "WCZYTAJ CONFIG"; LoadBtn.Font = Enum.Font.GothamBold; LoadBtn.TextColor3 = Color3.new(1,1,1); LoadBtn.TextSize = 14; Round(LoadBtn, 8)
+local SaveBtn = Instance.new("TextButton", TabSet)
+SaveBtn.Size = UDim2.new(1, -10, 0, 45)
+SaveBtn.BackgroundColor3 = Config.Colors.Element
+SaveBtn.Text = "ZAPISZ CONFIG"
+SaveBtn.Font = Enum.Font.GothamBold
+SaveBtn.TextColor3 = Color3.new(1,1,1)
+SaveBtn.TextSize = 14
+Round(SaveBtn, 8)
 
-local RivalsBtn = Instance.new("TextButton", TabSet); RivalsBtn.Size = UDim2.new(1, -10, 0, 40); RivalsBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65); RivalsBtn.Text = "LOAD RIVALS (Key C)"; RivalsBtn.Font = Enum.Font.GothamBold; RivalsBtn.TextColor3 = Color3.new(0.7,0.7,1); RivalsBtn.TextSize = 13; Round(RivalsBtn, 8)
-local AR2Btn = Instance.new("TextButton", TabSet); AR2Btn.Size = UDim2.new(1, -10, 0, 40); AR2Btn.BackgroundColor3 = Color3.fromRGB(65, 45, 45); AR2Btn.Text = "LOAD AR2 (Key C)"; AR2Btn.Font = Enum.Font.GothamBold; AR2Btn.TextColor3 = Color3.new(1,0.7,0.7); AR2Btn.TextSize = 13; Round(AR2Btn, 8)
+local LoadBtn = Instance.new("TextButton", TabSet)
+LoadBtn.Size = UDim2.new(1, -10, 0, 45)
+LoadBtn.BackgroundColor3 = Config.Colors.Element
+LoadBtn.Text = "WCZYTAJ CONFIG"
+LoadBtn.Font = Enum.Font.GothamBold
+LoadBtn.TextColor3 = Color3.new(1,1,1)
+LoadBtn.TextSize = 14
+Round(LoadBtn, 8)
+
+local RivalsBtn = Instance.new("TextButton", TabSet)
+RivalsBtn.Size = UDim2.new(1, -10, 0, 40)
+RivalsBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+RivalsBtn.Text = "LOAD RIVALS (Key C)"
+RivalsBtn.Font = Enum.Font.GothamBold
+RivalsBtn.TextColor3 = Color3.new(0.7,0.7,1)
+RivalsBtn.TextSize = 13
+Round(RivalsBtn, 8)
+
+local AR2Btn = Instance.new("TextButton", TabSet)
+AR2Btn.Size = UDim2.new(1, -10, 0, 40)
+AR2Btn.BackgroundColor3 = Color3.fromRGB(65, 45, 45)
+AR2Btn.Text = "LOAD AR2 (Key C)"
+AR2Btn.Font = Enum.Font.GothamBold
+AR2Btn.TextColor3 = Color3.new(1,0.7,0.7)
+AR2Btn.TextSize = 13
+Round(AR2Btn, 8)
 
 RivalsBtn.MouseButton1Click:Connect(function()
     Config.Combat.AimKey = Enum.KeyCode.C
@@ -320,9 +595,13 @@ SaveBtn.MouseButton1Click:Connect(function()
         local function clean(o)
             local r = {}
             for k,v in pairs(o) do
-                if typeof(v) == "EnumItem" then r[k] = "ENUM_"..tostring(v.EnumType).."_"..v.Name
-                elseif type(v) == "table" then r[k] = clean(v)
-                else r[k] = v end
+                if typeof(v) == "EnumItem" then
+                    r[k] = "ENUM_"..tostring(v.EnumType).."_"..v.Name
+                elseif type(v) == "table" then
+                    r[k] = clean(v)
+                else
+                    r[k] = v
+                end
             end
             return r
         end
@@ -338,7 +617,9 @@ LoadBtn.MouseButton1Click:Connect(function()
                 for k,v in pairs(src) do
                     if type(v) == "string" and v:sub(1,5) == "ENUM_" then
                         local p = v:split("_")
-                        if #p >= 3 then pcall(function() dst[k] = Enum[p[2]][p[3]] end) end
+                        if #p >= 3 then
+                            pcall(function() dst[k] = Enum[p[2]][p[3]] end)
+                        end
                     elseif type(v) == "table" and type(dst[k]) == "table" then
                         restore(v, dst[k])
                     else
@@ -351,175 +632,107 @@ LoadBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local UnloadBtn = Instance.new("TextButton", TabSet); UnloadBtn.Size = UDim2.new(1, -10, 0, 45); UnloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40); UnloadBtn.Text = "WYŁĄCZ I WYCZYŚĆ"; UnloadBtn.Font = Enum.Font.GothamBold; UnloadBtn.TextColor3 = Color3.new(1,1,1); UnloadBtn.TextSize = 14; Round(UnloadBtn, 8)
+-- FOV Ring - zadeklarowany TYLKO RAZ
+local FOVRing = Drawing.new("Circle")
+FOVRing.Thickness = 1
+FOVRing.NumSides = 64
+FOVRing.Filled = false
+FOVRing.Transparency = 1
+FOVRing.Visible = false
+getgenv().FOVRing = FOVRing
 
-getgenv().FOVRing = Drawing.new("Circle")
-getgenv().FOVRing.Thickness = 1.5; getgenv().FOVRing.NumSides = 60; getgenv().FOVRing.Transparency = 0.7
+-- Crosshair - pre-allocated
+local CrossLines = {Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line")}
+for _, l in pairs(CrossLines) do
+    l.Thickness = 1.5
+    l.Color = Color3.new(0,1,0)
+    l.ZIndex = 10
+end
+
+-- ==============================================================================
+--[ Unload / Cleanup ]
+-- ==============================================================================
+local UnloadBtn = Instance.new("TextButton", TabSet)
+UnloadBtn.Size = UDim2.new(1, -10, 0, 45)
+UnloadBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+UnloadBtn.Text = "WYŁĄCZ I WYCZYŚĆ"
+UnloadBtn.Font = Enum.Font.GothamBold
+UnloadBtn.TextColor3 = Color3.new(1,1,1)
+UnloadBtn.TextSize = 14
+Round(UnloadBtn, 8)
 
 getgenv().UnloadSolar = function()
     Config.State.Unloaded = true
     if getgenv().ClearESP then pcall(getgenv().ClearESP) end
-    for _, c in pairs(getgenv().SolarConnections) do pcall(function() c:Disconnect() end) end
+    for _, c in pairs(getgenv().SolarConnections) do
+        pcall(function() c:Disconnect() end)
+    end
     if ScreenGui then ScreenGui:Destroy() end
-    if getgenv().FOVRing then pcall(function() getgenv().FOVRing:Remove() end) end
-    if CrossLines then for _, l in pairs(CrossLines) do pcall(function() l:Remove() end) end end
-    
+    if FOVRing then pcall(function() FOVRing:Remove() end) end
+    if CrossLines then
+        for _, l in pairs(CrossLines) do
+            pcall(function() l:Remove() end)
+        end
+    end
+
     -- Przywracanie oświetlenia
-    game:GetService("Lighting").Brightness = OriginalLighting.Brightness
-    game:GetService("Lighting").ClockTime = OriginalLighting.ClockTime
-    game:GetService("Lighting").GlobalShadows = OriginalLighting.GlobalShadows
-    game:GetService("Lighting").OutdoorAmbient = OriginalLighting.OutdoorAmbient
-    getgenv().SolarConfig = nil; getgenv().UnloadSolar = nil; getgenv().ClearESP = nil
-    print("[SOLARA] Wersja v5 wyczyszczona.")
+    Lighting.Brightness = OriginalLighting.Brightness
+    Lighting.ClockTime = OriginalLighting.ClockTime
+    Lighting.GlobalShadows = OriginalLighting.GlobalShadows
+    Lighting.OutdoorAmbient = OriginalLighting.OutdoorAmbient
+
+    -- Przywracanie hitboxów
+    for p, size in pairs(OriginalHeadSizes) do
+        local char = p and p.Character
+        if char then
+            local head = char:FindFirstChild("Head")
+            if head then
+                head.Size = size
+                head.Transparency = 0
+                head.Color = OriginalHeadColors[p] or Color3.new(1,1,1)
+                head.Material = OriginalHeadMats[p] or Enum.Material.SmoothPlastic
+                head.CanCollide = true
+            end
+        end
+    end
+    OriginalHeadSizes = nil
+    OriginalHeadColors = nil
+    OriginalHeadMats = nil
+
+    getgenv().SolarConfig = nil
+    getgenv().UnloadSolar = nil
+    getgenv().ClearESP = nil
+    print("[SOLARA] Wersja v6 wyczyszczona.")
 end
+
 UnloadBtn.MouseButton1Click:Connect(getgenv().UnloadSolar)
-table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i, g) if not g and i.KeyCode == Enum.KeyCode.RightControl then ScreenGui.Enabled = not ScreenGui.Enabled end end))
+
+table.insert(getgenv().SolarConnections, UserInputService.InputBegan:Connect(function(i, g)
+    if not g and i.KeyCode == Enum.KeyCode.RightControl then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end))
 
 -- ==============================================================================
---[ LOGIKA ESP v5 (ULTRA OPTIMIZED) ]
+--[ LOGIKA ESP v6 (ULTRA OPTIMIZED) ]
 -- ==============================================================================
-local CurrentT = nil 
-getgenv().FOVRing = Drawing.new("Circle")
-getgenv().FOVRing.Thickness = 1
-getgenv().FOVRing.NumSides = 64
-getgenv().FOVRing.Filled = false
-getgenv().FOVRing.Transparency = 1
-getgenv().FOVRing.Visible = false
-
+local CurrentT = nil
 local Cache = { Draw = {}, Chams = {}, Backtrack = {} }
-local SkeletonConns = {{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}}
+
+local SkeletonConns = {
+    {"Head", "UpperTorso"},
+    {"UpperTorso", "LowerTorso"},
+    {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"},
+    {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"},
+    {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"}
+}
+
 local BodyParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
-
-local function CreateDrawings(p)
-    local d = {
-        Box = Drawing.new("Square"), BoxOut = Drawing.new("Square"), Corners = {}, CornersOut = {},
-        HealthBG = Drawing.new("Square"), Health = Drawing.new("Square"),
-        Tag = Drawing.new("Text"), Dist = Drawing.new("Text"), Weapon = Drawing.new("Text"), Team = Drawing.new("Text"),
-        Tracer = Drawing.new("Line"), Skeleton = {}, Arrows = Drawing.new("Triangle")
-    }
-    for i=1, #SkeletonConns do d.Skeleton[i] = Drawing.new("Line"); d.Skeleton[i].Thickness = 1 end
-    d.Arrows.Thickness = 1; d.Arrows.Filled = true; d.Arrows.Color = Config.Colors.Main
-    d.Box.Thickness = 1; d.BoxOut.Thickness = 3; d.BoxOut.Color = Color3.new(0,0,0)
-    for i=1, 8 do d.Corners[i] = Drawing.new("Line"); d.Corners[i].Thickness = 1; d.CornersOut[i] = Drawing.new("Line"); d.CornersOut[i].Thickness = 3; d.CornersOut[i].Color = Color3.new(0,0,0) end
-    d.HealthBG.Filled = true; d.HealthBG.Color = Color3.new(0,0,0); d.Health.Filled = true
-    d.Tag.Size = 13; d.Tag.Center = true; d.Tag.Outline = true; d.Tag.Font = 2
-    d.Dist.Size = 12; d.Dist.Center = true; d.Dist.Outline = true; d.Dist.Font = 2; d.Dist.Color = Config.Colors.Distance
-    d.Weapon.Size = 11; d.Weapon.Center = true; d.Weapon.Outline = true; d.Weapon.Font = 2; d.Weapon.Color = Config.Colors.Accent
-    d.Team.Size = 11; d.Team.Center = true; d.Team.Outline = true; d.Team.Font = 2; d.Team.Color = Color3.fromRGB(100, 200, 255)
-    d.Tracer.Thickness = 1
-    Cache.Draw[p] = d
-end
-
-local function HideAll(p)
-    local d = Cache.Draw[p]
-    if d and (d.Tag.Visible or d.Box.Visible or d.Tracer.Visible) then 
-        d.Box.Visible = false; d.BoxOut.Visible = false
-        for i=1, 8 do d.Corners[i].Visible = false; d.CornersOut[i].Visible = false end
-        d.Health.Visible = false; d.HealthBG.Visible = false
-        d.Tag.Visible = false; d.Dist.Visible = false; d.Weapon.Visible = false; d.Team.Visible = false; d.Tracer.Visible = false; d.Arrows.Visible = false
-        for _, l in pairs(d.Skeleton) do l.Visible = false end
-    end
-    if Cache.Chams[p] and Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = false end
-end
-
-local function RemovePlayer(p)
-    if Cache.Draw[p] then 
-        for _, v in pairs(Cache.Draw[p]) do 
-            if type(v) == "table" then 
-                for _, l in pairs(v) do pcall(function() l:Remove() end) end 
-            else 
-                pcall(function() v:Remove() end) 
-            end 
-        end 
-        Cache.Draw[p] = nil 
-    end
-    if Cache.Chams[p] then pcall(function() Cache.Chams[p]:Destroy() end); Cache.Chams[p] = nil end
-end
-
--- ==============================================================================
---[ ITEM ESP v5 (AUG ONLY) ]
--- ==============================================================================
-local ItemCache = {}
-
-local function CreateItemDrawing(item)
-    local t = Drawing.new("Text")
-    t.Size = 13; t.Center = true; t.Outline = true; t.Color = Color3.fromRGB(0, 255, 255)
-    t.Visible = false
-    ItemCache[item] = t
-end
-
-local ItemESPLoop = RunService.RenderStepped:Connect(function()
-    if Config.State.Unloaded or not Config.Visuals.ItemESPAUG then
-        for i, v in pairs(ItemCache) do v.Visible = false end
-        return
-    end
-
-    -- Skanowanie przedmiotów (oszczędność wydajności: co 2 sekundy pełny skan)
-    if tick() % 2 < 0.05 then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            -- Szukamy "AUG" ale ignorujemy te, które gracze trzymają w rękach
-            local name = obj.Name:lower()
-            if (name:find("aug") or name:find("steyr")) and not ItemCache[obj] then
-                -- Sprawdzamy czy to nie jest broń w ręku gracza
-                local isHeld = false
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p.Character and obj:IsDescendantOf(p.Character) then
-                        isHeld = true; break
-                    end
-                end
-                
-                if not isHeld then
-                    CreateItemDrawing(obj)
-                end
-            end
-        end
-    end
-
-    for item, draw in pairs(ItemCache) do
-        if not item or not item.Parent then
-            draw:Remove()
-            ItemCache[item] = nil
-            continue
-        end
-        
-        -- Ukrywamy jeśli ktoś podniósł przedmiot (jest wewnątrz postaci)
-        local isHeld = false
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p.Character and item:IsDescendantOf(p.Character) then isHeld = true; break end
-        end
-
-        if isHeld then
-            draw.Visible = false
-            continue
-        end
-
-        local pos = item:IsA("BasePart") and item.Position or (item:IsA("Model") and item:GetPivot().Position)
-        if pos then
-            local dist = (Camera.CFrame.Position - pos).Magnitude
-            if dist < Config.Visuals.MaxDistance then
-                local scr, on = Camera:WorldToViewportPoint(pos)
-                if on then
-                    draw.Position = Vector2.new(scr.X, scr.Y)
-                    draw.Text = "[AUG] [" .. math.floor(dist) .. "m]"
-                    draw.Visible = true
-                else
-                    draw.Visible = false
-                end
-            else
-                draw.Visible = false
-            end
-        end
-    end
-end)
-table.insert(getgenv().SolarConnections, ItemESPLoop)
-
-getgenv().ClearESP = function()
-    for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end
-    for heli, _ in pairs(HeliCache or {}) do
-        for _, v in pairs(heli) do pcall(function() v:Remove() end) end
-    end
-    for _, v in pairs(ItemCache) do pcall(function() v:Remove() end) end
-end
 
 -- Pre-allocowane stałe (nie tworzone w pętli = zero GC)
 local COL_GREEN   = Color3.new(0, 1, 0)
@@ -528,383 +741,228 @@ local COL_BLACK   = Color3.new(0, 0, 0)
 local V3_UP25     = Vector3.new(0, 2.5, 0)
 local V3_DOWN3    = Vector3.new(0, -3, 0)
 local V2_ZERO     = Vector2.new(0, 0)
-local CrossLines  = {Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line"), Drawing.new("Line")}
-for _,l in pairs(CrossLines) do l.Thickness = 1.5; l.Color = Color3.new(0,1,0); l.ZIndex = 10 end
 
--- Cache nazw graczy (string concat tworzy śmieć co klatkę)
+-- Cache nazw graczy
 local NameCache = {}
 local TeamCache = {}
-local ToolCache = {} -- nazwa broni gracza
-local _espTick  = 0  -- licznik do throttlowania drogich operacji
+local ToolCache = {}
+local _espTick  = 0
 
-local ESP_Loop = RunService.RenderStepped:Connect(function()
-    if Config.State.Unloaded then 
-        for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end 
-        return 
+local function CreateDrawings(p)
+    local d = {
+        Box = Drawing.new("Square"),
+        BoxOut = Drawing.new("Square"),
+        Corners = {},
+        CornersOut = {},
+        HealthBG = Drawing.new("Square"),
+        Health = Drawing.new("Square"),
+        Tag = Drawing.new("Text"),
+        Dist = Drawing.new("Text"),
+        Weapon = Drawing.new("Text"),
+        Team = Drawing.new("Text"),
+        Tracer = Drawing.new("Line"),
+        Skeleton = {},
+        Arrows = Drawing.new("Triangle")
+    }
+    for i = 1, #SkeletonConns do
+        d.Skeleton[i] = Drawing.new("Line")
+        d.Skeleton[i].Thickness = 1
     end
-    _espTick = _espTick + 1
-    local slowTick = (_espTick % 10 == 0) -- co 10 klatek: drogie operacje
-    
-    -- Cache'ujemy transform kamery RAZ na całą iterację (nie recalculate per-gracz)
-    local camPos    = Camera.CFrame.Position
-    local vpSize    = Camera.ViewportSize
-    local halfVpX   = vpSize.X * 0.5
-    local vpY       = vpSize.Y
-    local maxDist   = Config.Visuals.MaxDistance
-    local showBox   = Config.Visuals.BoxESP
-    local showCorner= Config.Visuals.CornerBox
-    local showHP    = Config.Visuals.HealthBar
-    local showTags  = Config.Visuals.NameTags
-    local showWep   = Config.Visuals.WeaponESP
-    local showTrace = Config.Visuals.Tracers
-    local showSkel  = Config.Visuals.Skeleton
-    local showArrow = Config.Visuals.OffScreenArrows
-    local showChams = Config.Visuals.Chams
-    local enemyCol  = Config.Colors.Enemy
-    local hpHigh    = Config.Colors.HealthHigh
-    local hpMid     = Config.Colors.HealthMid
-    local hpLow     = Config.Colors.HealthLow
-    local distCol   = Config.Colors.Distance
-    local accentCol = Config.Colors.Accent
-    local textSize  = Config.Visuals.TextSize
+    d.Arrows.Thickness = 1
+    d.Arrows.Filled = true
+    d.Arrows.Color = Config.Colors.Main
 
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        if not Cache.Draw[p] then
-            CreateDrawings(p)
-            NameCache[p] = p.Name
-            TeamCache[p] = nil
-            ToolCache[p]  = "None"
+    d.Box.Thickness = 1
+    d.BoxOut.Thickness = 3
+    d.BoxOut.Color = COL_BLACK
+
+    for i = 1, 8 do
+        d.Corners[i] = Drawing.new("Line")
+        d.Corners[i].Thickness = 1
+        d.CornersOut[i] = Drawing.new("Line")
+        d.CornersOut[i].Thickness = 3
+        d.CornersOut[i].Color = COL_BLACK
+    end
+
+    d.HealthBG.Filled = true
+    d.HealthBG.Color = COL_BLACK
+    d.Health.Filled = true
+
+    d.Tag.Size = 13
+    d.Tag.Center = true
+    d.Tag.Outline = true
+    d.Tag.Font = 2
+
+    d.Dist.Size = 12
+    d.Dist.Center = true
+    d.Dist.Outline = true
+    d.Dist.Font = 2
+    d.Dist.Color = Config.Colors.Distance
+
+    d.Weapon.Size = 11
+    d.Weapon.Center = true
+    d.Weapon.Outline = true
+    d.Weapon.Font = 2
+    d.Weapon.Color = Config.Colors.Accent
+
+    d.Team.Size = 11
+    d.Team.Center = true
+    d.Team.Outline = true
+    d.Team.Font = 2
+    d.Team.Color = Color3.fromRGB(100, 200, 255)
+
+    d.Tracer.Thickness = 1
+    Cache.Draw[p] = d
+end
+
+local function HideAll(p)
+    local d = Cache.Draw[p]
+    if d then
+        if not (d.Tag.Visible or d.Box.Visible or d.Tracer.Visible) then return end
+        d.Box.Visible = false
+        d.BoxOut.Visible = false
+        for i = 1, 8 do
+            d.Corners[i].Visible = false
+            d.CornersOut[i].Visible = false
         end
-        local char = p.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("Head"))
-        
-        if root and hum and hum.Health > 0 then
-            local rootPos = root.Position
-            local dist = (camPos - rootPos).Magnitude
-            if dist > maxDist then HideAll(p) continue end
-            
-            local pos, onScreen = Camera:WorldToViewportPoint(rootPos)
-            if onScreen then
-                local d = Cache.Draw[p]
-                -- Oblicz rozmiar boxa przez offset pionowy (2 WorldToViewport zamiast 3)
-                local hPos = Camera:WorldToViewportPoint(rootPos + V3_UP25)
-                local lPos = Camera:WorldToViewportPoint(rootPos + V3_DOWN3)
-                local h    = math.abs(hPos.Y - lPos.Y)
-                local w    = h * 0.6
-                local bx   = pos.X - w * 0.5
-                local by   = hPos.Y
-                local bPos = Vector2.new(bx, by)
-                
-                -- BOX ESP
-                local boxWant = showBox and not showCorner
-                if d.Box.Visible ~= boxWant then
-                    d.Box.Visible = boxWant; d.BoxOut.Visible = boxWant
-                end
-                if boxWant then
-                    d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = enemyCol
-                    d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h)
-                end
-                
-                -- CORNER BOX
-                local cVis = showBox and showCorner
-                if d.Corners[1].Visible ~= cVis then
-                    for i = 1, 8 do d.Corners[i].Visible = cVis; d.CornersOut[i].Visible = cVis end
-                end
-                if cVis then
-                    local cl = w * 0.25
-                    local c, co = d.Corners, d.CornersOut
-                    local bpw = bPos + Vector2.new(w, 0)
-                    local bph = bPos + Vector2.new(0, h)
-                    local bpwh= bPos + Vector2.new(w, h)
-                    c[1].From=bPos;  c[1].To=bPos+Vector2.new(cl,0)
-                    c[2].From=bPos;  c[2].To=bPos+Vector2.new(0,cl)
-                    c[3].From=bpw;   c[3].To=bpw-Vector2.new(cl,0)
-                    c[4].From=bpw;   c[4].To=bpw+Vector2.new(0,cl)
-                    c[5].From=bph;   c[5].To=bph+Vector2.new(cl,0)
-                    c[6].From=bph;   c[6].To=bph-Vector2.new(0,cl)
-                    c[7].From=bpwh;  c[7].To=bpwh-Vector2.new(cl,0)
-                    c[8].From=bpwh;  c[8].To=bpwh-Vector2.new(0,cl)
-                    for i=1,8 do
-                        c[i].Color=enemyCol; co[i].From=c[i].From; co[i].To=c[i].To
-                    end
-                end
-
-                -- HEALTH BAR
-                if d.Health.Visible ~= showHP then
-                    d.Health.Visible = showHP; d.HealthBG.Visible = showHP
-                end
-                if showHP then
-                    local pct = hum.Health / hum.MaxHealth
-                    local hh  = h * pct
-                    d.HealthBG.Position = bPos - Vector2.new(6, 0)
-                    d.HealthBG.Size     = Vector2.new(3, h)
-                    d.Health.Position   = bPos + Vector2.new(-6, h - hh)
-                    d.Health.Size       = Vector2.new(3, hh)
-                    d.Health.Color      = pct > 0.6 and hpHigh or (pct > 0.3 and hpMid or hpLow)
-                end
-                
-                -- NAME / DISTANCE / TEAM (drogie stringa - odswiezamy co 10 klatek)
-                if d.Tag.Visible ~= showTags then
-                    d.Tag.Visible=showTags; d.Dist.Visible=showTags; d.Team.Visible=showTags
-                end
-                if showTags then
-                    d.Tag.Text = NameCache[p] or p.Name
-                    d.Tag.Size = textSize
-                    d.Tag.Position = Vector2.new(pos.X, by - 15)
-                    d.Dist.Text = math.floor(dist) .. "m"
-                    d.Dist.Size = textSize - 1
-                    d.Dist.Position = Vector2.new(pos.X, by + h + 2)
-                    if slowTick then
-                        TeamCache[p] = p.Team and ("\xf0\x9f\x91\xa5 " .. p.Team.Name) or "\xf0\x9f\x91\xa5 No Team"
-                    end
-                    d.Team.Text = TeamCache[p] or "..."
-                    d.Team.Size = textSize - 2
-                    d.Team.Position = Vector2.new(pos.X, by + h + 14)
-                end
-                
-                -- WEAPON ESP (tylko co 10 klatek - FindFirstChildOfClass jest drogie)
-                if d.Weapon.Visible ~= showWep then d.Weapon.Visible = showWep end
-                if showWep then
-                    if slowTick then
-                        local tool = char:FindFirstChildOfClass("Tool")
-                        ToolCache[p] = "\xf0\x9f\x94\xab " .. (tool and tool.Name or "None")
-                    end
-                    d.Weapon.Text = ToolCache[p] or "..."
-                    d.Weapon.Size = textSize - 2
-                    d.Weapon.Position = Vector2.new(pos.X, by + h + (showTags and 26 or 2))
-                end
-
-                -- TRACERS
-                if d.Tracer.Visible ~= showTrace then d.Tracer.Visible = showTrace end
-                if showTrace then
-                    d.Tracer.From  = Vector2.new(halfVpX, vpY)
-                    d.Tracer.To    = Vector2.new(pos.X, by + h)
-                    d.Tracer.Color = (CurrentT == p) and COL_GREEN or COL_WHITE
-                end
-
-                -- CHAMS (Highlight) - tworzymy tylko raz
-                if showChams and dist < 800 then
-                    if not Cache.Chams[p] then 
-                        local hi = Instance.new("Highlight")
-                        hi.Parent             = SafeGui
-                        hi.Adornee            = char
-                        hi.FillColor          = enemyCol
-                        hi.FillTransparency   = 0.5
-                        hi.OutlineColor       = COL_WHITE
-                        hi.OutlineTransparency= 0
-                        hi.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
-                        Cache.Chams[p] = hi
-                    end
-                    if not Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = true end
-                elseif Cache.Chams[p] and Cache.Chams[p].Enabled then 
-                    Cache.Chams[p].Enabled = false 
-                end
-
-                -- SKELETON ESP
-                if d.Skeleton[1].Visible ~= showSkel then for _,l in pairs(d.Skeleton) do l.Visible = showSkel end end
-                if showSkel then
-                    for i, bone in pairs(SkeletonConns) do
-                        local b1, b2 = char:FindFirstChild(bone[1]), char:FindFirstChild(bone[2])
-                        if b1 and b2 then
-                            local p1, o1 = Camera:WorldToViewportPoint(b1.Position)
-                            local p2, o2 = Camera:WorldToViewportPoint(b2.Position)
-                            if o1 and o2 then
-                                d.Skeleton[i].From = Vector2.new(p1.X, p1.Y)
-                                d.Skeleton[i].To   = Vector2.new(p2.X, p2.Y)
-                                d.Skeleton[i].Color = enemyCol
-                            else d.Skeleton[i].Visible = false end
-                        else d.Skeleton[i].Visible = false end
-                    end
-                end
-
-                -- OFF-SCREEN ARROWS
-                d.Arrows.Visible = false -- Resetuj na ekranie
-            else 
-                HideAll(p)
-                -- Pokaż strzałkę jeśli gracz jest poza ekranem, ale w zasięgu
-                if showArrow and dist < maxDist then
-                    local d = Cache.Draw[p]
-                    local relativePos = Camera.CFrame:PointToObjectSpace(rootPos)
-                    local angle = math.atan2(-relativePos.X, relativePos.Z)
-                    local arrowSize = 15
-                    local arrowRadius = 200
-                    
-                    local center = Vector2.new(halfVpX, vpY * 0.5)
-                    local dir = Vector2.new(math.sin(angle), math.cos(angle))
-                    local pos = center + dir * arrowRadius
-                    
-                    d.Arrows.PointA = pos + dir * arrowSize
-                    d.Arrows.PointB = pos + Vector2.new(dir.Y, -dir.X) * (arrowSize * 0.6)
-                    d.Arrows.PointC = pos + Vector2.new(-dir.Y, dir.X) * (arrowSize * 0.6)
-                    d.Arrows.Visible = true
-                end
-            end
-            
-            -- BACKTRACK Logic (Zapisujemy pozycję co klatkę)
-            if not Cache.Backtrack[p] then Cache.Backtrack[p] = {} end
-            table.insert(Cache.Backtrack[p], 1, root.Position)
-            if #Cache.Backtrack[p] > 10 then table.remove(Cache.Backtrack[p], 11) end
-        else 
-            HideAll(p) 
-            if Cache.Backtrack[p] then table.remove(Cache.Backtrack[p]) end
+        d.Health.Visible = false
+        d.HealthBG.Visible = false
+        d.Tag.Visible = false
+        d.Dist.Visible = false
+        d.Weapon.Visible = false
+        d.Team.Visible = false
+        d.Tracer.Visible = false
+        d.Arrows.Visible = false
+        for _, l in pairs(d.Skeleton) do
+            l.Visible = false
         end
     end
-    
-    -- FULLBRIGHT Logic
-    if Config.Misc.Fullbright then
-        game:GetService("Lighting").Brightness = 2
-        game:GetService("Lighting").ClockTime = 14
-        game:GetService("Lighting").GlobalShadows = false
-        game:GetService("Lighting").OutdoorAmbient = Color3.new(1,1,1)
-    else
-        game:GetService("Lighting").Brightness = OriginalLighting.Brightness
-        game:GetService("Lighting").GlobalShadows = OriginalLighting.GlobalShadows
-    end
-    
-    -- CROSSHAIR Logic
-    local chVis = Config.Visuals.Crosshair
-    for _, l in pairs(CrossLines) do l.Visible = chVis end
-    if chVis then
-        local m = UserInputService:GetMouseLocation()
-        local s = 6
-        local g = 3
-        CrossLines[1].From = m + Vector2.new(0, g); CrossLines[1].To = m + Vector2.new(0, s + g)
-        CrossLines[2].From = m - Vector2.new(0, g); CrossLines[2].To = m - Vector2.new(0, s + g)
-        CrossLines[3].From = m + Vector2.new(g, 0); CrossLines[3].To = m + Vector2.new(s + g, 0)
-        CrossLines[4].From = m - Vector2.new(g, 0); CrossLines[4].To = m - Vector2.new(s + g, 0)
-    end
-    -- STREAMPROOF Logic
-    ScreenGui.DisplayOrder = Config.Misc.Streamproof and -100 or 10
-    
-    -- HITBOX EXPANDER Logic
-    if slowTick then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
-                local head = p.Character:FindFirstChild("Head")
-                if head then
-                    if Config.Misc.ExpandHitbox then
-                        if not OriginalHeadSizes[p] then 
-                            OriginalHeadSizes[p] = head.Size 
-                            OriginalHeadColors[p] = head.Color
-                            OriginalHeadMats[p] = head.Material
-                        end
-                        head.Size = Vector3.new(Config.Misc.HitboxSize, Config.Misc.HitboxSize, Config.Misc.HitboxSize)
-                        head.Transparency = 0.6
-                        head.Color = Color3.fromRGB(255, 0, 0) -- Jaskrawy czerwony
-                        head.Material = Enum.Material.Neon
-                        head.CanCollide = false
-                    else
-                        if OriginalHeadSizes[p] then
-                            head.Size = OriginalHeadSizes[p]
-                            head.Transparency = 0
-                            head.Color = OriginalHeadColors[p]
-                            head.Material = OriginalHeadMats[p]
-                            head.CanCollide = true
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
-table.insert(getgenv().SolarConnections, ESP_Loop)
-Players.PlayerRemoving:Connect(RemovePlayer)
-
--- ==============================================================================
---[ AIMBOT v5 ]
--- ==============================================================================
-
-
--- Dane balistyczne broni (Speed = prędkość pocisku w studs/s, Gravity = opad kuli)
--- Wartości skalibrowane pod AR2 (1 stud ≈ 0.28m, silnik Roblox)
-local WeaponData = {
-    -- ===== SNAJPERKI =====
-    ["L96A1"]       = {Speed = 4200, Gravity = 35},
-    ["M24"]         = {Speed = 4000, Gravity = 38},
-    ["AWP"]         = {Speed = 4500, Gravity = 30},
-    ["Kar98k"]      = {Speed = 3800, Gravity = 42},
-    ["SVD"]         = {Speed = 3600, Gravity = 45},
-    ["Dragunov"]    = {Speed = 3600, Gravity = 45},
-    ["Mosin"]       = {Speed = 3800, Gravity = 40},
-    -- ===== DMR =====
-    ["SKS"]         = {Speed = 3400, Gravity = 48},
-    ["M14"]         = {Speed = 3200, Gravity = 50},
-    ["Mk14"]        = {Speed = 3300, Gravity = 48},
-    -- ===== KARABINY SZTURMOWE =====
-    ["AK-47"]       = {Speed = 2800, Gravity = 55},
-    ["AK47"]        = {Speed = 2800, Gravity = 55},
-    ["AK-74"]       = {Speed = 3100, Gravity = 45},
-    ["AK74"]        = {Speed = 3100, Gravity = 45},
-    ["AKS-74"]      = {Speed = 3100, Gravity = 45},
-    ["AKS74"]       = {Speed = 3100, Gravity = 45},
-    ["AKS-74U"]     = {Speed = 2800, Gravity = 50},
-    ["AUG"]         = {Speed = 3300, Gravity = 40},
-    ["M4A1"]        = {Speed = 3200, Gravity = 42},
-    ["M4"]          = {Speed = 3200, Gravity = 42},
-    ["HK416"]       = {Speed = 3300, Gravity = 40},
-    ["SCAR-L"]      = {Speed = 3100, Gravity = 45},
-    -- ===== SMG =====
-    ["MP5"]         = {Speed = 2600, Gravity = 60},
-    ["UMP45"]       = {Speed = 2400, Gravity = 65},
-    ["Vector"]      = {Speed = 2300, Gravity = 70},
-    ["P90"]         = {Speed = 2700, Gravity = 58},
-    -- ===== SHOTGUNY =====
-    ["M870"]        = {Speed = 1600, Gravity = 120},
-    ["SPAS-12"]     = {Speed = 1500, Gravity = 130},
-    ["Shotgun"]     = {Speed = 1550, Gravity = 125},
-}
-
--- Tabela częściowych dopasowań nazw (fuzzy matching dla AR2)
--- AR2 używa różnych wewnętrznych nazw narzędzi
-local WeaponFuzzy = {
-    {pattern = "AKS.?74U",  data = {Speed = 2600, Gravity = 196}},
-    {pattern = "AKS.?74",   data = {Speed = 2950, Gravity = 190}},  -- AKS-74 musi być PRZED AK-74
-    {pattern = "AK.?74",    data = {Speed = 2950, Gravity = 190}},
-    {pattern = "AK.?47",    data = {Speed = 2620, Gravity = 210}},
-    {pattern = "AUG",       data = {Speed = 3100, Gravity = 185}},
-    {pattern = "M4",        data = {Speed = 2950, Gravity = 188}},
-    {pattern = "HK4",       data = {Speed = 3050, Gravity = 185}},
-    {pattern = "SCAR",      data = {Speed = 2900, Gravity = 190}},
-    {pattern = "SVD",       data = {Speed = 3500, Gravity = 175}},
-    {pattern = "Dragunov",  data = {Speed = 3500, Gravity = 175}},
-    {pattern = "L96",       data = {Speed = 4000, Gravity = 150}},
-    {pattern = "M24",       data = {Speed = 3800, Gravity = 160}},
-    {pattern = "AWP",       data = {Speed = 4200, Gravity = 140}},
-    {pattern = "Kar98",     data = {Speed = 3600, Gravity = 170}},
-    {pattern = "SKS",       data = {Speed = 3200, Gravity = 180}},
-    {pattern = "MP5",       data = {Speed = 2400, Gravity = 210}},
-    {pattern = "UMP",       data = {Speed = 2100, Gravity = 220}},
-    {pattern = "Vector",    data = {Speed = 2000, Gravity = 215}},
-    {pattern = "P90",       data = {Speed = 2400, Gravity = 205}},
-    {pattern = "Shotgun",   data = {Speed = 1450, Gravity = 280}},
-    {pattern = "M870",      data = {Speed = 1500, Gravity = 280}},
-    {pattern = "SPAS",      data = {Speed = 1400, Gravity = 285}},
-}
-
-local function UpdateAim()
-    if not Config.Combat.AutoCalibration then return end
-    local char = LocalPlayer.Character
-    local tool = char and char:FindFirstChildOfClass("Tool")
-    if not tool then return end
-    local name = tool.Name
-    -- Najpierw: dokładne dopasowanie (szybsze)
-    local s = WeaponData[name]
-    if s then
-        Config.Combat.BulletSpeed = s.Speed
-        Config.Combat.BulletGravity = s.Gravity
-        return
-    end
-    -- Potem: fuzzy matching (dla niestandardowych nazw w AR2)
-    for _, entry in ipairs(WeaponFuzzy) do
-        if name:match(entry.pattern) then
-            Config.Combat.BulletSpeed = entry.data.Speed
-            Config.Combat.BulletGravity = entry.data.Gravity
-            return
-        end
+    if Cache.Chams[p] and Cache.Chams[p].Enabled then
+        Cache.Chams[p].Enabled = false
     end
 end
+
+local function RemovePlayer(p)
+    if Cache.Draw[p] then
+        for _, v in pairs(Cache.Draw[p]) do
+            if type(v) == "table" then
+                for _, l in pairs(v) do
+                    pcall(function() l:Remove() end)
+                end
+            else
+                pcall(function() v:Remove() end)
+            end
+        end
+        Cache.Draw[p] = nil
+    end
+    if Cache.Chams[p] then
+        pcall(function() Cache.Chams[p]:Destroy() end)
+        Cache.Chams[p] = nil
+    end
+    if Cache.Backtrack[p] then
+        Cache.Backtrack[p] = nil
+    end
+    NameCache[p] = nil
+    TeamCache[p] = nil
+    ToolCache[p] = nil
+end
+
+-- ==============================================================================
+--[ ITEM ESP v6 (AUG ONLY - OPTIMIZED) ]
+-- ==============================================================================
+local ItemCache = {}
+local ItemScanTick = 0
+
+local function CreateItemDrawing(item)
+    local t = Drawing.new("Text")
+    t.Size = 13
+    t.Center = true
+    t.Outline = true
+    t.Color = Color3.fromRGB(0, 255, 255)
+    t.Visible = false
+    ItemCache[item] = t
+end
+
+local ItemESPLoop = RunService.RenderStepped:Connect(function()
+    if Config.State.Unloaded then
+        for _, v in pairs(ItemCache) do v.Visible = false end
+        return
+    end
+
+    ItemScanTick = ItemScanTick + 1
+    local shouldScan = (ItemScanTick % 240 == 0) -- co ~4 sekundy (60fps * 4)
+
+    if Config.Visuals.ItemESPAUG then
+        -- Skanowanie tylko co 240 klatek
+        if shouldScan then
+            local newItems = {}
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                local name = obj.Name:lower()
+                if name:find("aug") or name:find("steyr") then
+                    -- Sprawdzamy czy to nie broń w ręku
+                    local isHeld = false
+                    for _, pl in ipairs(Players:GetPlayers()) do
+                        if pl.Character and obj:IsDescendantOf(pl.Character) then
+                            isHeld = true
+                            break
+                        end
+                    end
+                    if not isHeld then
+                        newItems[obj] = true
+                        if not ItemCache[obj] then
+                            CreateItemDrawing(obj)
+                        end
+                    end
+                end
+            end
+            -- Usuwamy itemy które zniknęły
+            for item, _ in pairs(ItemCache) do
+                if not newItems[item] then
+                    pcall(function() item:Remove() end) -- drawing remove
+                    ItemCache[item] = nil
+                end
+            end
+        end
+
+        for item, draw in pairs(ItemCache) do
+            if not item or not item.Parent then
+                pcall(function() draw:Remove() end)
+                ItemCache[item] = nil
+            else
+                -- Sprawdzamy czy ktoś podniósł
+                local isHeld = false
+                for _, pl in ipairs(Players:GetPlayers()) do
+                    if pl.Character and item:IsDescendantOf(pl.Character) then
+                        isHeld = true
+                        break
+                    end
+                end
+                if isHeld then
+                    draw.Visible = false
+                else
+                    local pos = item:IsA("BasePart") and item.Position or (item:IsA("Model") and item:GetPivot().Position)
+                    if pos then
+                        local dist = (Camera.CFrame.Position - pos).Magnitude
+                        if dist < Config.Visuals.MaxDistance then
+                        local scr, on = Camera:WorldToViewportPoint(pos)
+                        if on then
+                            draw.Position = Vector2.new(scr.X, scr.Y)
+                            draw.Text = "[AUG] [" .. math.floor(dist) .. "m]"
+                            draw.Visible = true
+                        else
+                            draw.Visible = false
+                        end
+                    else
+                        draw.Visible = false
+                    end
+                end
+            end
+        end
+    else
+        for _, v in pairs(ItemCache) do v.Visible = false end
+    end
+end)
+table.insert(getgenv().SolarConnections, ItemESPLoop)
 
 -- Cachujemy RaycastParams raz (eliminuje GC pressure - duży boost FPS)
 local _rayParams = RaycastParams.new()
