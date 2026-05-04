@@ -274,6 +274,29 @@ local CfgName = "AR2_SolarV5_Config.json"
 local SaveBtn = Instance.new("TextButton", TabSet); SaveBtn.Size = UDim2.new(1, -10, 0, 45); SaveBtn.BackgroundColor3 = Config.Colors.Element; SaveBtn.Text = "ZAPISZ CONFIG"; SaveBtn.Font = Enum.Font.GothamBold; SaveBtn.TextColor3 = Color3.new(1,1,1); SaveBtn.TextSize = 14; Round(SaveBtn, 8)
 local LoadBtn = Instance.new("TextButton", TabSet); LoadBtn.Size = UDim2.new(1, -10, 0, 45); LoadBtn.BackgroundColor3 = Config.Colors.Element; LoadBtn.Text = "WCZYTAJ CONFIG"; LoadBtn.Font = Enum.Font.GothamBold; LoadBtn.TextColor3 = Color3.new(1,1,1); LoadBtn.TextSize = 14; Round(LoadBtn, 8)
 
+local RivalsBtn = Instance.new("TextButton", TabSet); RivalsBtn.Size = UDim2.new(1, -10, 0, 40); RivalsBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65); RivalsBtn.Text = "LOAD RIVALS (Key C)"; RivalsBtn.Font = Enum.Font.GothamBold; RivalsBtn.TextColor3 = Color3.new(0.7,0.7,1); RivalsBtn.TextSize = 13; Round(RivalsBtn, 8)
+local AR2Btn = Instance.new("TextButton", TabSet); AR2Btn.Size = UDim2.new(1, -10, 0, 40); AR2Btn.BackgroundColor3 = Color3.fromRGB(65, 45, 45); AR2Btn.Text = "LOAD AR2 (Key C)"; AR2Btn.Font = Enum.Font.GothamBold; AR2Btn.TextColor3 = Color3.new(1,0.7,0.7); AR2Btn.TextSize = 13; Round(AR2Btn, 8)
+
+RivalsBtn.MouseButton1Click:Connect(function()
+    Config.Combat.AimKey = Enum.KeyCode.C
+    Config.Combat.AdvancedPrediction = false
+    Config.Combat.Smoothness = 0.5
+    Config.Combat.FOV = 100
+    Config.Combat.GravityScale = 0
+    Config.Combat.VerticalOffset = 0
+    print("[Solar] Loaded Rivals Preset")
+end)
+
+AR2Btn.MouseButton1Click:Connect(function()
+    Config.Combat.AimKey = Enum.KeyCode.C
+    Config.Combat.AdvancedPrediction = true
+    Config.Combat.Smoothness = 1
+    Config.Combat.FOV = 150
+    Config.Combat.GravityScale = 1
+    Config.Combat.VerticalOffset = 0
+    print("[Solar] Loaded AR2 Preset")
+end)
+
 SaveBtn.MouseButton1Click:Connect(function()
     if writefile then
         local t = {Visuals=Config.Visuals, Combat=Config.Combat, Misc=Config.Misc}
