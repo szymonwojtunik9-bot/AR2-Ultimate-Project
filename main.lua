@@ -293,90 +293,177 @@ end
 
 getgenv().ClearESP = function()
     for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end
+    for heli, _ in pairs(HeliCache or {}) do
+        for _, v in pairs(heli) do pcall(function() v:Remove() end) end
+    end
 end
+
+-- Pre-allocowane stałe (nie tworzone w pętli = zero GC)
+local COL_GREEN   = Color3.new(0, 1, 0)
+local COL_WHITE   = Color3.new(1, 1, 1)
+local COL_BLACK   = Color3.new(0, 0, 0)
+local V3_UP25     = Vector3.new(0, 2.5, 0)
+local V3_DOWN3    = Vector3.new(0, -3, 0)
+local V2_ZERO     = Vector2.new(0, 0)
+
+-- Cache nazw graczy (string concat tworzy śmieć co klatkę)
+local NameCache = {}
+local TeamCache = {}
+local ToolCache = {} -- nazwa broni gracza
+local _espTick  = 0  -- licznik do throttlowania drogich operacji
 
 local ESP_Loop = RunService.RenderStepped:Connect(function()
     if Config.State.Unloaded then 
         for p, _ in pairs(Cache.Draw) do RemovePlayer(p) end 
         return 
     end
+    _espTick = _espTick + 1
+    local slowTick = (_espTick % 10 == 0) -- co 10 klatek: drogie operacje
+    
+    -- Cache'ujemy transform kamery RAZ na całą iterację (nie recalculate per-gracz)
+    local camPos    = Camera.CFrame.Position
+    local vpSize    = Camera.ViewportSize
+    local halfVpX   = vpSize.X * 0.5
+    local vpY       = vpSize.Y
+    local maxDist   = Config.Visuals.MaxDistance
+    local showBox   = Config.Visuals.BoxESP
+    local showCorner= Config.Visuals.CornerBox
+    local showHP    = Config.Visuals.HealthBar
+    local showTags  = Config.Visuals.NameTags
+    local showWep   = Config.Visuals.WeaponESP
+    local showTrace = Config.Visuals.Tracers
+    local showChams = Config.Visuals.Chams
+    local enemyCol  = Config.Colors.Enemy
+    local hpHigh    = Config.Colors.HealthHigh
+    local hpMid     = Config.Colors.HealthMid
+    local hpLow     = Config.Colors.HealthLow
+    local distCol   = Config.Colors.Distance
+    local accentCol = Config.Colors.Accent
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
-        if not Cache.Draw[p] then CreateDrawings(p) end
+        if not Cache.Draw[p] then
+            CreateDrawings(p)
+            NameCache[p] = p.Name
+            TeamCache[p] = nil
+            ToolCache[p]  = "None"
+        end
         local char = p.Character
         local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
-        local hum = char and char:FindFirstChild("Humanoid")
+        local hum  = char and char:FindFirstChild("Humanoid")
         
         if root and hum and hum.Health > 0 then
-            local dist = (Camera.CFrame.Position - root.Position).Magnitude
-            if dist > Config.Visuals.MaxDistance then HideAll(p) continue end
+            local rootPos = root.Position
+            local dist = (camPos - rootPos).Magnitude
+            if dist > maxDist then HideAll(p) continue end
             
-            local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+            local pos, onScreen = Camera:WorldToViewportPoint(rootPos)
             if onScreen then
                 local d = Cache.Draw[p]
-                local hPos = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.5, 0))
-                local lPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
-                local h = math.abs(hPos.Y - lPos.Y); local w = h * 0.6; local bPos = Vector2.new(pos.X - w/2, hPos.Y)
+                -- Oblicz rozmiar boxa przez offset pionowy (2 WorldToViewport zamiast 3)
+                local hPos = Camera:WorldToViewportPoint(rootPos + V3_UP25)
+                local lPos = Camera:WorldToViewportPoint(rootPos + V3_DOWN3)
+                local h    = math.abs(hPos.Y - lPos.Y)
+                local w    = h * 0.6
+                local bx   = pos.X - w * 0.5
+                local by   = hPos.Y
+                local bPos = Vector2.new(bx, by)
                 
-                local showC = Config.Visuals.CornerBox
-                if d.Box.Visible ~= (Config.Visuals.BoxESP and not showC) then
-                    d.Box.Visible = Config.Visuals.BoxESP and not showC; d.BoxOut.Visible = d.Box.Visible
+                -- BOX ESP
+                local boxWant = showBox and not showCorner
+                if d.Box.Visible ~= boxWant then
+                    d.Box.Visible = boxWant; d.BoxOut.Visible = boxWant
+                end
+                if boxWant then
+                    d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = enemyCol
+                    d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h)
                 end
                 
-                if d.Box.Visible then d.Box.Position = bPos; d.Box.Size = Vector2.new(w, h); d.Box.Color = Config.Colors.Enemy; d.BoxOut.Position = bPos; d.BoxOut.Size = Vector2.new(w, h) end
-                
-                local cVis = Config.Visuals.BoxESP and showC
+                -- CORNER BOX
+                local cVis = showBox and showCorner
                 if d.Corners[1].Visible ~= cVis then
-                    for i=1, 8 do d.Corners[i].Visible = cVis; d.CornersOut[i].Visible = cVis end
+                    for i = 1, 8 do d.Corners[i].Visible = cVis; d.CornersOut[i].Visible = cVis end
                 end
-                
                 if cVis then
-                    local cl = w/4; local c, co = d.Corners, d.CornersOut
-                    c[1].From = bPos; c[1].To = bPos + Vector2.new(cl, 0); c[2].From = bPos; c[2].To = bPos + Vector2.new(0, cl)
-                    c[3].From = bPos + Vector2.new(w, 0); c[3].To = bPos + Vector2.new(w - cl, 0); c[4].From = bPos + Vector2.new(w, 0); c[4].To = bPos + Vector2.new(w, cl)
-                    c[5].From = bPos + Vector2.new(0, h); c[5].To = bPos + Vector2.new(cl, h); c[6].From = bPos + Vector2.new(0, h); c[6].To = bPos + Vector2.new(0, h - cl)
-                    c[7].From = bPos + Vector2.new(w, h); c[7].To = bPos + Vector2.new(w - cl, h); c[8].From = bPos + Vector2.new(w, h); c[8].To = bPos + Vector2.new(w, h - cl)
-                    for i=1, 8 do c[i].Color = Config.Colors.Enemy; co[i].From = c[i].From; co[i].To = c[i].To end
+                    local cl = w * 0.25
+                    local c, co = d.Corners, d.CornersOut
+                    local bpw = bPos + Vector2.new(w, 0)
+                    local bph = bPos + Vector2.new(0, h)
+                    local bpwh= bPos + Vector2.new(w, h)
+                    c[1].From=bPos;  c[1].To=bPos+Vector2.new(cl,0)
+                    c[2].From=bPos;  c[2].To=bPos+Vector2.new(0,cl)
+                    c[3].From=bpw;   c[3].To=bpw-Vector2.new(cl,0)
+                    c[4].From=bpw;   c[4].To=bpw+Vector2.new(0,cl)
+                    c[5].From=bph;   c[5].To=bph+Vector2.new(cl,0)
+                    c[6].From=bph;   c[6].To=bph-Vector2.new(0,cl)
+                    c[7].From=bpwh;  c[7].To=bpwh-Vector2.new(cl,0)
+                    c[8].From=bpwh;  c[8].To=bpwh-Vector2.new(0,cl)
+                    for i=1,8 do
+                        c[i].Color=enemyCol; co[i].From=c[i].From; co[i].To=c[i].To
+                    end
                 end
 
-                if d.Health.Visible ~= Config.Visuals.HealthBar then d.Health.Visible = Config.Visuals.HealthBar; d.HealthBG.Visible = Config.Visuals.HealthBar end
-                if d.Health.Visible then
-                    local pct = hum.Health / hum.MaxHealth; d.HealthBG.Position = bPos - Vector2.new(5, 0); d.HealthBG.Size = Vector2.new(2, h)
-                    d.Health.Position = bPos + Vector2.new(-5, h - (h*pct)); d.Health.Size = Vector2.new(2, h*pct); d.Health.Color = pct > 0.6 and Config.Colors.HealthHigh or (pct > 0.3 and Config.Colors.HealthMid or Config.Colors.HealthLow)
+                -- HEALTH BAR
+                if d.Health.Visible ~= showHP then
+                    d.Health.Visible = showHP; d.HealthBG.Visible = showHP
+                end
+                if showHP then
+                    local pct = hum.Health / hum.MaxHealth
+                    local hh  = h * pct
+                    d.HealthBG.Position = bPos - Vector2.new(6, 0)
+                    d.HealthBG.Size     = Vector2.new(3, h)
+                    d.Health.Position   = bPos + Vector2.new(-6, h - hh)
+                    d.Health.Size       = Vector2.new(3, hh)
+                    d.Health.Color      = pct > 0.6 and hpHigh or (pct > 0.3 and hpMid or hpLow)
                 end
                 
-                local showTags = Config.Visuals.NameTags
-                if d.Tag.Visible ~= showTags then d.Tag.Visible = showTags; d.Dist.Visible = showTags; d.Team.Visible = showTags end
-                if d.Weapon.Visible ~= Config.Visuals.WeaponESP then d.Weapon.Visible = Config.Visuals.WeaponESP end
-                
+                -- NAME / DISTANCE / TEAM (drogie stringa - odswiezamy co 10 klatek)
+                if d.Tag.Visible ~= showTags then
+                    d.Tag.Visible=showTags; d.Dist.Visible=showTags; d.Team.Visible=showTags
+                end
                 if showTags then
-                    d.Tag.Text = p.Name; d.Tag.Position = Vector2.new(pos.X, bPos.Y - 15)
-                    d.Dist.Text = math.floor(dist) .. "m"; d.Dist.Position = Vector2.new(pos.X, bPos.Y + h + 2)
-                    d.Team.Text = "👥 " .. (p.Team and p.Team.Name or "No Team"); d.Team.Position = Vector2.new(pos.X, bPos.Y + h + 14)
+                    d.Tag.Text = NameCache[p] or p.Name
+                    d.Tag.Position = Vector2.new(pos.X, by - 15)
+                    d.Dist.Text = math.floor(dist) .. "m"
+                    d.Dist.Position = Vector2.new(pos.X, by + h + 2)
+                    if slowTick then
+                        TeamCache[p] = p.Team and ("\xf0\x9f\x91\xa5 " .. p.Team.Name) or "\xf0\x9f\x91\xa5 No Team"
+                    end
+                    d.Team.Text = TeamCache[p] or "..."
+                    d.Team.Position = Vector2.new(pos.X, by + h + 14)
                 end
-                if d.Weapon.Visible then
-                    local tool = char:FindFirstChildOfClass("Tool"); d.Weapon.Text = "🔫 " .. (tool and tool.Name or "None"); d.Weapon.Position = Vector2.new(pos.X, bPos.Y + h + (showTags and 26 or 2))
+                
+                -- WEAPON ESP (tylko co 10 klatek - FindFirstChildOfClass jest drogie)
+                if d.Weapon.Visible ~= showWep then d.Weapon.Visible = showWep end
+                if showWep then
+                    if slowTick then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        ToolCache[p] = "\xf0\x9f\x94\xab " .. (tool and tool.Name or "None")
+                    end
+                    d.Weapon.Text = ToolCache[p] or "..."
+                    d.Weapon.Position = Vector2.new(pos.X, by + h + (showTags and 26 or 2))
                 end
 
-                if d.Tracer.Visible ~= Config.Visuals.Tracers then d.Tracer.Visible = Config.Visuals.Tracers end
-                if d.Tracer.Visible then
-                    d.Tracer.From = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
-                    d.Tracer.To = Vector2.new(pos.X, bPos.Y + h)
-                    d.Tracer.Color = (CurrentT == p) and Color3.new(0, 1, 0) or Color3.new(1, 1, 1)
+                -- TRACERS
+                if d.Tracer.Visible ~= showTrace then d.Tracer.Visible = showTrace end
+                if showTrace then
+                    d.Tracer.From  = Vector2.new(halfVpX, vpY)
+                    d.Tracer.To    = Vector2.new(pos.X, by + h)
+                    d.Tracer.Color = (CurrentT == p) and COL_GREEN or COL_WHITE
                 end
 
-                if Config.Visuals.Chams and dist < 800 then
+                -- CHAMS (Highlight) - tworzymy tylko raz
+                if showChams and dist < 800 then
                     if not Cache.Chams[p] then 
-                        local hInst = Instance.new("Highlight")
-                        hInst.Parent = SafeGui
-                        hInst.Adornee = char
-                        hInst.FillColor = Config.Colors.Enemy
-                        hInst.FillTransparency = 0.5
-                        hInst.OutlineColor = Color3.new(1,1,1)
-                        hInst.OutlineTransparency = 0
-                        hInst.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        Cache.Chams[p] = hInst
+                        local hi = Instance.new("Highlight")
+                        hi.Parent             = SafeGui
+                        hi.Adornee            = char
+                        hi.FillColor          = enemyCol
+                        hi.FillTransparency   = 0.5
+                        hi.OutlineColor       = COL_WHITE
+                        hi.OutlineTransparency= 0
+                        hi.DepthMode          = Enum.HighlightDepthMode.AlwaysOnTop
+                        Cache.Chams[p] = hi
                     end
                     if not Cache.Chams[p].Enabled then Cache.Chams[p].Enabled = true end
                 elseif Cache.Chams[p] and Cache.Chams[p].Enabled then 
@@ -395,36 +482,123 @@ Players.PlayerRemoving:Connect(RemovePlayer)
 -- ==============================================================================
 
 
+-- Dane balistyczne broni (Speed = prędkość pocisku w studs/s, Gravity = opad kuli)
+-- Wartości skalibrowane pod AR2 (1 stud ≈ 0.28m, silnik Roblox)
 local WeaponData = {
-    ["L96A1"] = {Speed = 4000, Gravity = 150}, ["M24"] = {Speed = 3800, Gravity = 160}, ["AK-47"] = {Speed = 2600, Gravity = 196},
-    ["AK-74"] = {Speed = 2800, Gravity = 196}, ["M4A1"] = {Speed = 2900, Gravity = 196}, ["HK416"] = {Speed = 3000, Gravity = 196},
+    -- ===== SNAJPERKI =====
+    ["L96A1"]       = {Speed = 4000, Gravity = 150},
+    ["M24"]         = {Speed = 3800, Gravity = 160},
+    ["AWP"]         = {Speed = 4200, Gravity = 140},
+    ["Kar98k"]      = {Speed = 3600, Gravity = 170},
+    ["SVD"]         = {Speed = 3500, Gravity = 175},
+    ["Dragunov"]    = {Speed = 3500, Gravity = 175},
+    ["Mosin"]       = {Speed = 3700, Gravity = 165},
+    -- ===== DMR =====
+    ["SKS"]         = {Speed = 3200, Gravity = 180},
+    ["M14"]         = {Speed = 3000, Gravity = 185},
+    ["Mk14"]        = {Speed = 3100, Gravity = 180},
+    -- ===== KARABINY SZTURMOWE =====
+    -- AK-47 (7.62x39mm - wolniejsza, cięższa kula, większy opad)
+    ["AK-47"]       = {Speed = 2620, Gravity = 210},
+    ["AK47"]        = {Speed = 2620, Gravity = 210},
+    -- AK-74 (5.45x39mm - szybsza, lżejsza kula, mniejszy opad)
+    -- Priorytet: DOKŁADNE wartości pod AR2
+    ["AK-74"]       = {Speed = 2950, Gravity = 190},
+    ["AK74"]        = {Speed = 2950, Gravity = 190},
+    -- AKS-74 (składana kolba, identyczna balistyka co AK-74)
+    ["AKS-74"]      = {Speed = 2950, Gravity = 190},
+    ["AKS74"]       = {Speed = 2950, Gravity = 190},
+    ["AKS 74"]      = {Speed = 2950, Gravity = 190},
+    -- AKS-74U (skrócona lufa = niższa prędkość)
+    ["AKS-74U"]     = {Speed = 2600, Gravity = 196},
+    ["AKS74U"]      = {Speed = 2600, Gravity = 196},
+    -- AUG (Steyr AUG, 5.56x45mm NATO - wysoka prędkość, mały opad)
+    ["AUG"]         = {Speed = 3100, Gravity = 185},
+    ["Steyr AUG"]   = {Speed = 3100, Gravity = 185},
+    ["AUG A1"]      = {Speed = 3100, Gravity = 185},
+    ["AUG A3"]      = {Speed = 3100, Gravity = 185},
+    -- M4/M16 (5.56x45mm NATO)
+    ["M4A1"]        = {Speed = 2950, Gravity = 188},
+    ["M4"]          = {Speed = 2950, Gravity = 188},
+    ["HK416"]       = {Speed = 3050, Gravity = 185},
+    ["SCAR-L"]      = {Speed = 2900, Gravity = 190},
+    ["M16A4"]       = {Speed = 3000, Gravity = 186},
+    ["FN FAL"]      = {Speed = 2750, Gravity = 200},
+    -- ===== SMG =====
+    ["MP5"]         = {Speed = 2400, Gravity = 210},
+    ["UMP45"]       = {Speed = 2100, Gravity = 220},
+    ["Vector"]      = {Speed = 2000, Gravity = 215},
+    ["P90"]         = {Speed = 2400, Gravity = 205},
+    -- ===== SHOTGUNY =====
+    ["M870"]        = {Speed = 1500, Gravity = 280},
+    ["SPAS-12"]     = {Speed = 1400, Gravity = 285},
+    ["Shotgun"]     = {Speed = 1450, Gravity = 280},
+}
+
+-- Tabela częściowych dopasowań nazw (fuzzy matching dla AR2)
+-- AR2 używa różnych wewnętrznych nazw narzędzi
+local WeaponFuzzy = {
+    {pattern = "AKS.?74U",  data = {Speed = 2600, Gravity = 196}},
+    {pattern = "AKS.?74",   data = {Speed = 2950, Gravity = 190}},  -- AKS-74 musi być PRZED AK-74
+    {pattern = "AK.?74",    data = {Speed = 2950, Gravity = 190}},
+    {pattern = "AK.?47",    data = {Speed = 2620, Gravity = 210}},
+    {pattern = "AUG",       data = {Speed = 3100, Gravity = 185}},
+    {pattern = "M4",        data = {Speed = 2950, Gravity = 188}},
+    {pattern = "HK4",       data = {Speed = 3050, Gravity = 185}},
+    {pattern = "SCAR",      data = {Speed = 2900, Gravity = 190}},
+    {pattern = "SVD",       data = {Speed = 3500, Gravity = 175}},
+    {pattern = "Dragunov",  data = {Speed = 3500, Gravity = 175}},
+    {pattern = "L96",       data = {Speed = 4000, Gravity = 150}},
+    {pattern = "M24",       data = {Speed = 3800, Gravity = 160}},
+    {pattern = "AWP",       data = {Speed = 4200, Gravity = 140}},
+    {pattern = "Kar98",     data = {Speed = 3600, Gravity = 170}},
+    {pattern = "SKS",       data = {Speed = 3200, Gravity = 180}},
+    {pattern = "MP5",       data = {Speed = 2400, Gravity = 210}},
+    {pattern = "UMP",       data = {Speed = 2100, Gravity = 220}},
+    {pattern = "Vector",    data = {Speed = 2000, Gravity = 215}},
+    {pattern = "P90",       data = {Speed = 2400, Gravity = 205}},
+    {pattern = "Shotgun",   data = {Speed = 1450, Gravity = 280}},
+    {pattern = "M870",      data = {Speed = 1500, Gravity = 280}},
+    {pattern = "SPAS",      data = {Speed = 1400, Gravity = 285}},
 }
 
 local function UpdateAim()
     if not Config.Combat.AutoCalibration then return end
-    local char = LocalPlayer.Character; local tool = char and char:FindFirstChildOfClass("Tool")
-    if tool then
-        local s = WeaponData[tool.Name]
-        if s then Config.Combat.BulletSpeed = s.Speed; Config.Combat.BulletGravity = s.Gravity end
+    local char = LocalPlayer.Character
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if not tool then return end
+    local name = tool.Name
+    -- Najpierw: dokładne dopasowanie (szybsze)
+    local s = WeaponData[name]
+    if s then
+        Config.Combat.BulletSpeed = s.Speed
+        Config.Combat.BulletGravity = s.Gravity
+        return
+    end
+    -- Potem: fuzzy matching (dla niestandardowych nazw w AR2)
+    for _, entry in ipairs(WeaponFuzzy) do
+        if name:match(entry.pattern) then
+            Config.Combat.BulletSpeed = entry.data.Speed
+            Config.Combat.BulletGravity = entry.data.Gravity
+            return
+        end
     end
 end
 
+-- Cachujemy RaycastParams raz (eliminuje GC pressure - duży boost FPS)
+local _rayParams = RaycastParams.new()
+_rayParams.FilterType = Enum.RaycastFilterType.Exclude
+_rayParams.IgnoreWater = true
+
 local function IsVisible(targetPart)
     if not targetPart then return false end
+    -- Aktualizujemy listę filtrów (character może się zmienić)
+    _rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     local rayOrigin = Camera.CFrame.Position
-    local rayDirection = (targetPart.Position - rayOrigin)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
-    rayParams.IgnoreWater = true
-    
-    local raycastResult = Workspace:Raycast(rayOrigin, rayDirection, rayParams)
-    
-    if raycastResult then
-        if raycastResult.Instance:IsDescendantOf(targetPart.Parent) then
-            return true
-        end
-        return false
+    local rayDir = (targetPart.Position - rayOrigin)
+    local result = Workspace:Raycast(rayOrigin, rayDir, _rayParams)
+    if result then
+        return result.Instance:IsDescendantOf(targetPart.Parent)
     end
     return true
 end
@@ -530,24 +704,31 @@ local AimLoop = RunService.RenderStepped:Connect(function()
                 local aimP = part.Position
                 if Config.Combat.AdvancedPrediction then
                     local d = (Camera.CFrame.Position - aimP).Magnitude
+                    -- Iteracyjne przewidywanie - 2 iteracje dla większej precyzji na dużych dystansach
                     local t = d / math.max(Config.Combat.BulletSpeed, 500)
-                    local sensitivity = Config.Combat.PredictionMult
-                    
                     local vel = root.AssemblyLinearVelocity
-                    if vel.Magnitude > 100 then vel = vel.Unit * 100 end
-                    
-                    local leadOffset = vel * (t * sensitivity)
-                    local dropOffset = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t*t), 0)
-                    
+                    -- Nie ucinaj prędkości - ogranicz tylko ekstremalne wartości (exploit)
+                    if vel.Magnitude > 250 then vel = vel.Unit * 250 end
+                    local pred1 = aimP + vel * t
+                    -- Druga iteracja (poprawia precyzję przy ruchu na dużych dystansach)
+                    local d2 = (Camera.CFrame.Position - pred1).Magnitude
+                    local t2 = d2 / math.max(Config.Combat.BulletSpeed, 500)
+                    local leadOffset = vel * (t2 * Config.Combat.PredictionMult)
+                    local dropOffset = Vector3.new(0, 0.5 * Config.Combat.BulletGravity * (t2*t2), 0)
                     aimP = aimP + leadOffset + dropOffset
                 end
                 local pos, on = Camera:WorldToViewportPoint(aimP)
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
                 if on or physDist <= 50 then
                     local m = UserInputService:GetMouseLocation()
-                    local mx = (pos.X - m.X) * Config.Combat.Smoothness
-                    local my = (pos.Y - m.Y) * Config.Combat.Smoothness
-                    if mousemoverel then mousemoverel(math.clamp(mx, -100, 100), math.clamp(my, -100, 100)) end
+                    local dx = pos.X - m.X
+                    local dy = pos.Y - m.Y
+                    -- Step-based smoothing: proporcjonalny do odległości od celu na ekranie
+                    local screenDist = math.sqrt(dx*dx + dy*dy)
+                    local step = math.min(screenDist, 50) * Config.Combat.Smoothness
+                    local mx = (screenDist > 0) and (dx / screenDist * step) or 0
+                    local my = (screenDist > 0) and (dy / screenDist * step) or 0
+                    if mousemoverel then mousemoverel(mx, my) end
                 else CurrentT = nil end
             end
         end
