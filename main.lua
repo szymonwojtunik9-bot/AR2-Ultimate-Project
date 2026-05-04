@@ -66,7 +66,7 @@ getgenv().SolarConfig = {
         MaxDistance = 3000,
         Smoothness = 1,
         AimPart = "Head",
-        WallCheck = true,
+        WallCheck = false,
         TeamCheck = false,
         AdvancedPrediction = true,
         PredictionMult = 1,
@@ -559,7 +559,7 @@ local ESP_Loop = RunService.RenderStepped:Connect(function()
             ToolCache[p]  = "None"
         end
         local char = p.Character
-        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
+        local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
         local hum  = char and char:FindFirstChild("Humanoid")
         
         if root and hum and hum.Health > 0 then
@@ -887,6 +887,7 @@ _rayParams.IgnoreWater = true
 
 local function IsVisible(targetPart)
     if not targetPart then return false end
+    if not Config.Combat.WallCheck then return true end
     -- Optymalizacja: Ignore list zawiera naszą postać i całe modele graczy by uniknąć trafiania w ich akcesoria
     _rayParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
     local rayOrigin = Camera.CFrame.Position
@@ -911,7 +912,7 @@ local function GetClosest()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local char = p.Character
-            local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart"))
+            local root = char and (char.PrimaryPart or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso"))
             local hum = char and char:FindFirstChild("Humanoid")
             if root and hum and hum.Health > 0 then
                 local physDist = (root.Position - Camera.CFrame.Position).Magnitude
